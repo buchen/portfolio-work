@@ -67,6 +67,11 @@ import name.abuchen.portfolio.money.Money;
         return client;
     }
 
+    protected boolean wasSecurityCreated(Security security)
+    {
+        return securityCache.wasCreated(security);
+    }
+
     @Override
     public List<Item> extract(int skipLines, List<String[]> rawValues, Map<String, Column> field2column,
                     List<Exception> errors)
