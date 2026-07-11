@@ -2,21 +2,31 @@ package name.abuchen.portfolio.datatransfer.csv;
 
 import java.text.MessageFormat;
 import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.StringJoiner;
 
 import name.abuchen.portfolio.Messages;
 import name.abuchen.portfolio.datatransfer.Extractor;
+import name.abuchen.portfolio.datatransfer.Extractor.SecurityUpdateItem;
+import name.abuchen.portfolio.datatransfer.SecurityUpdate;
 import name.abuchen.portfolio.datatransfer.csv.CSVImporter.AmountField;
 import name.abuchen.portfolio.datatransfer.csv.CSVImporter.Column;
 import name.abuchen.portfolio.datatransfer.csv.CSVImporter.DateField;
 import name.abuchen.portfolio.datatransfer.csv.CSVImporter.Field;
+import name.abuchen.portfolio.model.AttributeType;
 import name.abuchen.portfolio.model.Client;
+import name.abuchen.portfolio.model.Security;
 import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
 
 /* package */class CSVSecurityExtractor extends BaseCSVExtractor
 {
+    private Map<Security, SecurityUpdateItem> pendingUpdates;
+    private List<AttributeType> importableAttributes;
+
     /* package */ CSVSecurityExtractor(Client client)
     {
         super(client, Messages.CSVDefSecurities);
@@ -32,6 +42,10 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
         fields.add(new DateField("date", Messages.CSVColumn_DateQuote).setOptional(true)); //$NON-NLS-1$
         fields.add(new AmountField("quote", Messages.CSVColumn_Quote, "Schluss", "Schlusskurs", "Close") //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
                         .setOptional(true));
+
+        SecurityAttributeColumns.importable(getClient()).forEach(attribute -> //
+                        fields.add(new Field(SecurityAttributeColumns.fieldCode(attribute),
+                                        SecurityAttributeColumns.columnNames(attribute)).setOptional(true)));
     }
 
     @Override
@@ -41,9 +55,41 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
     }
 
     @Override
+    public List<Item> extract(int skipLines, List<String[]> rawValues, Map<String, Column> field2column,
+                    List<Exception> errors)
+    {
+        pendingUpdates = null;
+        importableAttributes = SecurityAttributeColumns.importable(getClient()).toList();
+        return super.extract(skipLines, rawValues, field2column, errors);
+    }
+
+    @Override
     void extract(List<Item> items, String[] rawValues, Map<String, Column> field2column) throws ParseException
     {
-        // check if we can identify a security
+        // 1. parse pending attribute values up front (row is rejected atomically
+        //    if a converter fails, before any security/price item is created)
+        List<SecurityUpdate.AttributeUpdate> parsed = new ArrayList<>();
+        for (AttributeType attribute : importableAttributes)
+        {
+            String raw = getText(SecurityAttributeColumns.fieldCode(attribute), rawValues, field2column);
+            if (raw == null)
+                continue; // blank cell -> not provided, never clears
+
+            Object value;
+            try
+            {
+                value = attribute.getConverter().fromString(raw);
+            }
+            catch (IllegalArgumentException e)
+            {
+                throw new ParseException(MessageFormat.format(Messages.CSVFormatInvalid,
+                                SecurityAttributeColumns.preferredColumnName(attribute), raw), 0);
+            }
+
+            if (value != null)
+                parsed.add(new SecurityUpdate.AttributeUpdate(attribute, value));
+        }
+
         var security = getSecurity(rawValues, field2column, s -> {
             s.setCurrencyCode(getCurrencyCode("currency", rawValues, field2column));
 
@@ -57,6 +103,10 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
                 s.setFeed(YahooFinanceQuoteFeed.ID);
             }
 
+            // set attributes directly on the fresh, still-unattached security
+            for (SecurityUpdate.AttributeUpdate u : parsed)
+                u.applyTo(s);
+
             items.add(new Extractor.SecurityItem(s));
         });
 
@@ -67,12 +117,85 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
                                             .toString()),
                             0);
 
-        // nothing to do to add the security: if necessary, the security item
-        // has been created in the callback of the #extractSecurity method
-
-        // check if the data contains price
+        // 2. for existing securities, collect changes into a deferred update item.
+        //    use wasSecurityCreated (not the creation callback) so the 2nd row of a
+        //    freshly created security is also treated as "new", not "existing"
+        if (!wasSecurityCreated(security))
+            collectUpdate(items, security, parsed, rawValues, field2column);
 
         getSecurityPrice("date", rawValues, field2column)
                         .ifPresent(price -> items.add(new SecurityPriceItem(security, price)));
+    }
+
+    private void collectUpdate(List<Item> items, Security security,
+                    List<SecurityUpdate.AttributeUpdate> attributeUpdates, String[] rawValues,
+                    Map<String, Column> field2column)
+    {
+        if (pendingUpdates == null)
+            pendingUpdates = new HashMap<>();
+
+        // build this row's desired changes, suppressing no-ops. the baseline is
+        // deliberately the security's stored value, not the value a previous row
+        // claimed: a row that merely restates what is already stored is treated
+        // as "no change" and therefore never competes for conflict detection. as
+        // a consequence, if one row changes an attribute and another row restates
+        // the stored value, the change wins silently rather than being flagged as
+        // a conflict. that only matters when the same existing security appears in
+        // several rows of one file (uncommon for master data) and is the intended
+        // semantic; switching to a stated-value baseline would require tracking
+        // suppressed values separately from the applied updates.
+        List<SecurityUpdate> rowUpdates = new ArrayList<>();
+
+        for (SecurityUpdate.AttributeUpdate u : attributeUpdates)
+        {
+            Object current = security.getAttributes().get(u.type());
+            if (!Objects.equals(current, u.value()))
+                rowUpdates.add(u);
+        }
+
+        var note = getText("note", rawValues, field2column);
+        if (note != null && !Objects.equals(note, security.getNote()))
+            rowUpdates.add(new SecurityUpdate.NoteUpdate(note));
+
+        if (rowUpdates.isEmpty())
+            return;
+
+        SecurityUpdateItem item = pendingUpdates.get(security);
+        if (item == null)
+        {
+            item = new SecurityUpdateItem(security, new ArrayList<>(rowUpdates));
+            pendingUpdates.put(security, item);
+            items.add(item);
+            return;
+        }
+
+        // merge into the existing item; conflicting value for same label -> failure
+        for (SecurityUpdate u : rowUpdates)
+            mergeOrConflict(item, u, security);
+    }
+
+    private void mergeOrConflict(SecurityUpdateItem item, SecurityUpdate incoming, Security security)
+    {
+        for (SecurityUpdate existing : item.getUpdates())
+        {
+            if (existing instanceof SecurityUpdate.AttributeUpdate ea
+                            && incoming instanceof SecurityUpdate.AttributeUpdate ia
+                            && ea.type().equals(ia.type()))
+            {
+                if (!Objects.equals(ea.value(), ia.value()) && !item.isFailure())
+                    item.setFailureMessage(MessageFormat.format(Messages.CSVSecurityUpdateConflict,
+                                    SecurityAttributeColumns.preferredColumnName(ia.type()), security.getName()));
+                return; // same attribute already present
+            }
+            if (existing instanceof SecurityUpdate.NoteUpdate en
+                            && incoming instanceof SecurityUpdate.NoteUpdate in)
+            {
+                if (!Objects.equals(en.note(), in.note()) && !item.isFailure())
+                    item.setFailureMessage(MessageFormat.format(Messages.CSVSecurityUpdateConflict,
+                                    Messages.CSVColumn_Note, security.getName()));
+                return;
+            }
+        }
+        item.getUpdates().add(incoming);
     }
 }
