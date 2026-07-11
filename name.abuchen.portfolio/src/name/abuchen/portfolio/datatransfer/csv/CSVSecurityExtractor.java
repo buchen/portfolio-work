@@ -32,15 +32,15 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
         super(client, Messages.CSVDefSecurities);
 
         var fields = getFields();
-        fields.add(new Field("isin", Messages.CSVColumn_ISIN).setOptional(true)); //$NON-NLS-1$
-        fields.add(new Field("wkn", Messages.CSVColumn_WKN).setOptional(true)); //$NON-NLS-1$
-        fields.add(new Field("ticker", Messages.CSVColumn_TickerSymbol).setOptional(true)); //$NON-NLS-1$
-        fields.add(new Field("name", Messages.CSVColumn_SecurityName).setOptional(true)); //$NON-NLS-1$
-        fields.add(new Field("currency", Messages.CSVColumn_Currency).setOptional(true)); //$NON-NLS-1$
-        fields.add(new Field("note", Messages.CSVColumn_Note).setOptional(true)); //$NON-NLS-1$
+        fields.add(new Field(FieldCode.ISIN, Messages.CSVColumn_ISIN).setOptional(true));
+        fields.add(new Field(FieldCode.WKN, Messages.CSVColumn_WKN).setOptional(true));
+        fields.add(new Field(FieldCode.TICKER, Messages.CSVColumn_TickerSymbol).setOptional(true));
+        fields.add(new Field(FieldCode.NAME, Messages.CSVColumn_SecurityName).setOptional(true));
+        fields.add(new Field(FieldCode.CURRENCY, Messages.CSVColumn_Currency).setOptional(true));
+        fields.add(new Field(FieldCode.NOTE, Messages.CSVColumn_Note).setOptional(true));
 
-        fields.add(new DateField("date", Messages.CSVColumn_DateQuote).setOptional(true)); //$NON-NLS-1$
-        fields.add(new AmountField("quote", Messages.CSVColumn_Quote, "Schluss", "Schlusskurs", "Close") //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+        fields.add(new DateField(FieldCode.DATE, Messages.CSVColumn_DateQuote).setOptional(true));
+        fields.add(new AmountField(FieldCode.QUOTE, Messages.CSVColumn_Quote, "Schluss", "Schlusskurs", "Close") //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
                         .setOptional(true));
 
         SecurityAttributeColumns.importable(getClient()).forEach(attribute -> //
@@ -91,12 +91,12 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
         }
 
         var security = getSecurity(rawValues, field2column, s -> {
-            s.setCurrencyCode(getCurrencyCode("currency", rawValues, field2column));
+            s.setCurrencyCode(getCurrencyCode(FieldCode.CURRENCY, rawValues, field2column));
 
-            var note = getText("note", rawValues, field2column);
+            var note = getText(FieldCode.NOTE, rawValues, field2column);
             s.setNote(note);
 
-            var tickerSymbol = getText("ticker", rawValues, field2column);
+            var tickerSymbol = getText(FieldCode.TICKER, rawValues, field2column);
             if (tickerSymbol != null && !tickerSymbol.isBlank())
             {
                 s.setTickerSymbol(tickerSymbol);
@@ -123,7 +123,7 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
         if (!wasSecurityCreated(security))
             collectUpdate(items, security, parsed, rawValues, field2column);
 
-        getSecurityPrice("date", rawValues, field2column)
+        getSecurityPrice(FieldCode.DATE, rawValues, field2column)
                         .ifPresent(price -> items.add(new SecurityPriceItem(security, price)));
     }
 
@@ -153,7 +153,7 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
                 rowUpdates.add(u);
         }
 
-        var note = getText("note", rawValues, field2column);
+        var note = getText(FieldCode.NOTE, rawValues, field2column);
         if (note != null && !Objects.equals(note, security.getNote()))
             rowUpdates.add(new SecurityUpdate.NoteUpdate(note));
 
