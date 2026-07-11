@@ -69,9 +69,9 @@ import name.abuchen.portfolio.money.Money;
 
         // check if we have a security
         var security = getSecurity(rawValues, field2column, s -> {
-            var currency = getText(Messages.CSVColumn_CurrencyGrossAmount, rawValues, field2column);
+            var currency = getText("currencyGross", rawValues, field2column);
             if (currency == null || currency.isEmpty())
-                currency = getText(Messages.CSVColumn_TransactionCurrency, rawValues, field2column);
+                currency = getText("currency", rawValues, field2column);
 
             if (currency != null)
             {
@@ -94,14 +94,14 @@ import name.abuchen.portfolio.money.Money;
         var type = inferType(rawValues, field2column, amount);
 
         // determine remaining fields
-        var date = getDate(Messages.CSVColumn_Date, Messages.CSVColumn_Time, rawValues, field2column);
+        var date = getDate("date", "time", rawValues, field2column);
         if (date == null)
             throw new ParseException(MessageFormat.format(Messages.CSVImportMissingField, Messages.CSVColumn_Date), 0);
 
-        var shares = getShares(Messages.CSVColumn_Shares, rawValues, field2column);
-        var fees = getAmount(Messages.CSVColumn_Fees, rawValues, field2column);
-        var taxes = getAmount(Messages.CSVColumn_Taxes, rawValues, field2column);
-        var note = getText(Messages.CSVColumn_Note, rawValues, field2column);
+        var shares = getShares("shares", rawValues, field2column);
+        var fees = getAmount("fees", rawValues, field2column);
+        var taxes = getAmount("taxes", rawValues, field2column);
+        var note = getText("note", rawValues, field2column);
 
         Optional<Unit> grossAmount = extractGrossAmount(rawValues, field2column, amount);
 
@@ -208,7 +208,7 @@ import name.abuchen.portfolio.money.Money;
 
     private Type inferType(String[] rawValues, Map<String, Column> field2column, Money amount) throws ParseException
     {
-        var type = getEnum(Messages.CSVColumn_Type, PortfolioTransaction.Type.class, rawValues, field2column);
+        var type = getEnum("type", PortfolioTransaction.Type.class, rawValues, field2column);
         if (type == null)
             type = amount.isNegative() ? Type.BUY : Type.SELL;
         return type;

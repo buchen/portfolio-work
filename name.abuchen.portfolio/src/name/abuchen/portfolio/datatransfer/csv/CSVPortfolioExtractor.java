@@ -57,7 +57,7 @@ import name.abuchen.portfolio.money.CurrencyUnit;
     {
         // check if we have a security
         var security = getSecurity(rawValues, field2column, s -> {
-            var currency = getText(Messages.CSVColumn_Currency, rawValues, field2column);
+            var currency = getText("currency", rawValues, field2column);
             if (currency != null)
             {
                 var unit = CurrencyUnit.getInstance(currency.trim());
@@ -72,20 +72,20 @@ import name.abuchen.portfolio.money.CurrencyUnit;
                             0);
 
         // check for valuation (either current or historic)
-        var valuation = getMoney(Messages.CSVColumn_Value, Messages.CSVColumn_Currency, rawValues, field2column);
+        var valuation = getMoney("value", "currency", rawValues, field2column);
 
         // check for the number of shares
-        var shares = getShares(Messages.CSVColumn_Shares, rawValues, field2column);
+        var shares = getShares("shares", rawValues, field2column);
         if (shares == null)
             throw new ParseException(MessageFormat.format(Messages.CSVImportMissingField, Messages.CSVColumn_Shares),
                             0);
 
         // determine remaining fields
-        var date = getDate(Messages.CSVColumn_DateValue, Messages.CSVColumn_Time, rawValues, field2column);
+        var date = getDate("date", "time", rawValues, field2column);
         if (date == null)
             date = LocalDate.now().atStartOfDay();
 
-        var note = getText(Messages.CSVColumn_Note, rawValues, field2column);
+        var note = getText("note", rawValues, field2column);
 
         var account = getAccount(getClient(), rawValues, field2column);
         var portfolio = getPortfolio(getClient(), rawValues, field2column);
@@ -108,7 +108,7 @@ import name.abuchen.portfolio.money.CurrencyUnit;
 
         // check if the data contains price
 
-        getSecurityPrice(Messages.CSVColumn_DateQuote, rawValues, field2column)
+        getSecurityPrice("date-quote", rawValues, field2column)
                         .ifPresent(price -> items.add(new SecurityPriceItem(security, price)));
     }
 }

@@ -45,12 +45,12 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
     {
         // check if we can identify a security
         var security = getSecurity(rawValues, field2column, s -> {
-            s.setCurrencyCode(getCurrencyCode(Messages.CSVColumn_Currency, rawValues, field2column));
+            s.setCurrencyCode(getCurrencyCode("currency", rawValues, field2column));
 
-            var note = getText(Messages.CSVColumn_Note, rawValues, field2column);
+            var note = getText("note", rawValues, field2column);
             s.setNote(note);
 
-            var tickerSymbol = getText(Messages.CSVColumn_TickerSymbol, rawValues, field2column);
+            var tickerSymbol = getText("ticker", rawValues, field2column);
             if (tickerSymbol != null && !tickerSymbol.isBlank())
             {
                 s.setTickerSymbol(tickerSymbol);
@@ -72,7 +72,7 @@ import name.abuchen.portfolio.online.impl.YahooFinanceQuoteFeed;
 
         // check if the data contains price
 
-        getSecurityPrice(Messages.CSVColumn_DateQuote, rawValues, field2column)
+        getSecurityPrice("date", rawValues, field2column)
                         .ifPresent(price -> items.add(new SecurityPriceItem(security, price)));
     }
 }

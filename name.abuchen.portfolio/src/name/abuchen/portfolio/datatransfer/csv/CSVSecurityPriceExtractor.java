@@ -71,11 +71,11 @@ import name.abuchen.portfolio.model.SecurityPrice;
 
     private SecurityPrice extract(String[] rawValues, Map<String, Column> field2column) throws ParseException
     {
-        var date = getDate(Messages.CSVColumn_Date, null, rawValues, field2column);
+        var date = getDate("date", null, rawValues, field2column);
         if (date == null)
             throw new ParseException(MessageFormat.format(Messages.CSVImportMissingField, Messages.CSVColumn_Date), 0);
 
-        var amount = getQuote(Messages.CSVColumn_Quote, rawValues, field2column);
+        var amount = getQuote("quote", rawValues, field2column);
         if (amount == null)
             throw new ParseException(MessageFormat.format(Messages.CSVImportMissingField, Messages.CSVColumn_Quote), 0);
 
