@@ -743,7 +743,7 @@ paths:
     post:
       operationId: createTransaction
       tags: [Transactions]
-      summary: Create a cash-account transaction event
+      summary: Create a transaction event
       description: |
         Creates an event in memory and marks the file dirty; does not save it.
         References must already exist. All invalid or unknown fields are reported
@@ -754,7 +754,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCashTransaction"
+              oneOf:
+                - $ref: "#/components/schemas/CreateCashTransaction"
+                - $ref: "#/components/schemas/CreateBuySellTransaction"
+                - $ref: "#/components/schemas/CreateDeliveryTransaction"
       responses:
         "201":
           description: Created transaction
@@ -1837,6 +1840,77 @@ components:
         units:
           type: array
           description: Fee units only for dividends; tax units for dividends or interest. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateBuySellTransaction:
+      type: object
+      additionalProperties: false
+      description: Linked investment and cash event. Net amount must be positive and use the cash account currency.
+      required: [type, dateTime, investmentAccount, cashAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [buy, sell]
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fees, taxes and forex detail; derived gross must be positive. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateDeliveryTransaction:
+      type: object
+      additionalProperties: false
+      description: |
+        Investment-only event. The investment account must have a reference cash account.
+        Gross must be positive; outbound net may be zero when fees and taxes consume gross.
+        Inbound net must be positive. Amount currency is selectable.
+      required: [type, dateTime, investmentAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [delivery-inbound, delivery-outbound]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fees, taxes and forex detail; derived gross must be positive. Defaults to empty.
           items:
             $ref: "#/components/schemas/TransactionUnitInput"
 

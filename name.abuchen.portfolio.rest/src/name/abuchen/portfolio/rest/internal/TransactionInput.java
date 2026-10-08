@@ -18,7 +18,10 @@ import name.abuchen.portfolio.datatransfer.ImportAction.Status;
 import name.abuchen.portfolio.datatransfer.TransactionRules;
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.AccountTransaction;
+import name.abuchen.portfolio.model.BuySellEntry;
 import name.abuchen.portfolio.model.Client;
+import name.abuchen.portfolio.model.Portfolio;
+import name.abuchen.portfolio.model.PortfolioTransaction;
 import name.abuchen.portfolio.model.Security;
 import name.abuchen.portfolio.model.Transaction;
 import name.abuchen.portfolio.money.Money;
@@ -37,38 +40,87 @@ final class TransactionInput
                     "dividend", AccountTransaction.Type.DIVIDENDS);
     private final List<ApiException.FieldError> errors = new ArrayList<>();
 
-    record Cash(Account account, AccountTransaction transaction)
-    {}
+    TransactionsHandler.Event parse(Client client, JsonObject body, String clientName)
+    {
+        var type = text(body.get("type"), "type", true);
+        var event = switch (type == null ? "" : type)
+        {
+            case "buy", "sell", "delivery-inbound", "delivery-outbound" -> investment(client, body, clientName, type);
+            default -> cash(client, body, clientName, type);
+        };
+        if (!errors.isEmpty())
+            throw ApiException.validation(errors);
+        return event;
+    }
 
-    Cash cash(Client client, JsonObject body, String clientName)
+    private TransactionsHandler.Event cash(Client client, JsonObject body, String clientName, String type)
     {
         unknown(body, Set.of("type", "dateTime", "cashAccount", "instrument", "shares", "amount", "exDate",
                         "note", "source", "units"), "");
         var transaction = new AccountTransaction();
-        var type = text(body.get("type"), "type", true);
         transaction.setType(type == null ? null : CASH_TYPES.get(type));
         if (type != null && transaction.getType() == null)
             error("type", "invalid-value", "unsupported transaction type");
-        transaction.setDateTime(date(body.get("dateTime"), "dateTime", true));
         transaction.setExDate(date(body.get("exDate"), "exDate", false));
-        transaction.setNote(text(body.get("note"), "note", false));
-        transaction.setSource(body.has("source") ? text(body.get("source"), "source", false) : clientName);
         var account = reference(body.get("cashAccount"), "cashAccount", client.getAccounts(), Account::getUUID, true);
         transaction.setSecurity(reference(body.get("instrument"), "instrument", client.getSecurities(), Security::getUUID, false));
+        common(body, transaction, clientName, false);
+        statuses(TransactionRules.entryProfile().validate(transaction, account));
+        return new TransactionsHandler.Event(account, transaction);
+    }
+
+    private TransactionsHandler.Event investment(Client client, JsonObject body, String clientName, String type)
+    {
+        boolean linked = type.equals("buy") || type.equals("sell");
+        unknown(body, linked
+                        ? Set.of("type", "dateTime", "investmentAccount", "cashAccount", "instrument", "shares", "amount", "note", "source", "units")
+                        : Set.of("type", "dateTime", "investmentAccount", "instrument", "shares", "amount", "note", "source", "units"), "");
+        var portfolio = reference(body.get("investmentAccount"), "investmentAccount", client.getPortfolios(), Portfolio::getUUID, true);
+        var entry = linked ? new BuySellEntry() : null;
+        var transaction = linked ? entry.getPortfolioTransaction() : new PortfolioTransaction();
+        transaction.setType(switch (type)
+        {
+            case "buy" -> PortfolioTransaction.Type.BUY;
+            case "sell" -> PortfolioTransaction.Type.SELL;
+            case "delivery-inbound" -> PortfolioTransaction.Type.DELIVERY_INBOUND;
+            default -> PortfolioTransaction.Type.DELIVERY_OUTBOUND;
+        });
+        transaction.setSecurity(reference(body.get("instrument"), "instrument", client.getSecurities(), Security::getUUID, true));
+        common(body, transaction, clientName, true);
+        if (linked)
+        {
+            var account = reference(body.get("cashAccount"), "cashAccount", client.getAccounts(), Account::getUUID, true);
+            entry.setPortfolio(portfolio);
+            entry.setAccount(account);
+            entry.setType(transaction.getType());
+            entry.setDate(transaction.getDateTime());
+            entry.setSecurity(transaction.getSecurity());
+            entry.setAmount(transaction.getAmount());
+            entry.setCurrencyCode(transaction.getCurrencyCode());
+            entry.setNote(transaction.getNote());
+            entry.setSource(transaction.getSource());
+            statuses(TransactionRules.entryProfile().validate(entry, account, portfolio));
+        }
+        else
+            statuses(TransactionRules.entryProfile().validate(transaction, portfolio));
+        return new TransactionsHandler.Event(portfolio, transaction);
+    }
+
+    private void common(JsonObject body, Transaction transaction, String clientName, boolean sharesRequired)
+    {
+        transaction.setDateTime(date(body.get("dateTime"), "dateTime", true));
+        transaction.setNote(text(body.get("note"), "note", false));
+        transaction.setSource(body.has("source") ? text(body.get("source"), "source", false) : clientName);
         var amount = money(body.get("amount"), "amount", true);
         if (amount != null)
             transaction.setMonetaryAmount(amount);
-        if (body.has("shares"))
+        if (sharesRequired || body.has("shares"))
         {
             var shares = scaled(body.get("shares"), "shares", 8);
             if (shares != null)
                 transaction.setShares(shares);
         }
         units(body.get("units"), transaction);
-        statuses(TransactionRules.entryProfile().validate(transaction, account));
-        if (!errors.isEmpty())
-            throw ApiException.validation(errors);
-        return new Cash(account, transaction);
     }
 
     private void units(JsonElement value, Transaction transaction)

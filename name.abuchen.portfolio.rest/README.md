@@ -190,9 +190,9 @@ The complete response shapes and type vocabulary are in [openapi.yaml](openapi.y
 
 ### `POST /v1/files/{file}/transactions`
 
-Creates a cash-account event and returns it with `201` and a `Location` header.
-Supported types are deposit, removal, interest, interest-charge, fee, fee-refund,
-tax, tax-refund and dividend. Entity references contain only `uuid`; accounts and
+Creates a cash, buy/sell or delivery event and returns it with `201` and a `Location`
+header. Buys and sells create both linked records together. Deliveries require an
+investment account with a reference cash account. Entity references contain only `uuid`; accounts and
 instruments must already exist. See the request schema in [openapi.yaml](openapi.yaml).
 
 Money uses exactly representable two-decimal values and shares up to eight decimals;

@@ -2,12 +2,14 @@ package name.abuchen.portfolio.rest.internal;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -17,9 +19,12 @@ import org.junit.Test;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import name.abuchen.portfolio.checks.Check;
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.AccountTransaction;
+import name.abuchen.portfolio.model.BuySellEntry;
 import name.abuchen.portfolio.model.Client;
+import name.abuchen.portfolio.model.Portfolio;
 import name.abuchen.portfolio.model.Security;
 import name.abuchen.portfolio.rest.ApiRoutes;
 import name.abuchen.portfolio.rest.FileAccessRegistry;
@@ -31,6 +36,7 @@ public class TransactionCreateTest
     private final Client client = new Client();
     private final Account account = new Account();
     private final Security security = new Security();
+    private final Portfolio portfolio = new Portfolio();
     private final AtomicInteger dirty = new AtomicInteger();
 
     public TransactionCreateTest()
@@ -41,6 +47,9 @@ public class TransactionCreateTest
         security.setName("Instrument");
         security.setCurrencyCode("EUR");
         client.addSecurity(security);
+        portfolio.setName("Investments");
+        portfolio.setReferenceAccount(account);
+        client.addPortfolio(portfolio);
         client.addPropertyChangeListener("dirty", event -> dirty.incrementAndGet());
     }
 
@@ -72,10 +81,12 @@ public class TransactionCreateTest
     private ApiException rejected(JsonObject body)
     {
         int count = account.getTransactions().size();
+        int investments = portfolio.getTransactions().size();
         int changes = dirty.get();
         var error = assertThrows(ApiException.class, () -> create(body));
         assertEquals(422, error.getStatus());
         assertEquals(count, account.getTransactions().size());
+        assertEquals(investments, portfolio.getTransactions().size());
         assertEquals(changes, dirty.get());
         return error;
     }
@@ -84,6 +95,151 @@ public class TransactionCreateTest
     {
         assertTrue(error.getErrors().toString(), error.getErrors().stream()
                         .anyMatch(value -> value.field().equals(field) && value.code().equals(code)));
+    }
+
+    private JsonObject investmentBody(String type)
+    {
+        var body = body(type);
+        instrument(body);
+        var reference = new JsonObject();
+        reference.addProperty("uuid", portfolio.getUUID());
+        body.add("investmentAccount", reference);
+        body.add("shares", JsonParser.parseString("1.23456789"));
+        if (type.startsWith("delivery"))
+            body.remove("cashAccount");
+        return body;
+    }
+
+    private void assertCrossEntriesConsistent()
+    {
+        var check = ServiceLoader.load(Check.class, Check.class.getClassLoader()).stream()
+                        .filter(provider -> provider.type().getName().equals("name.abuchen.portfolio.checks.impl.CrossEntryCheck"))
+                        .findFirst().orElseThrow().get();
+        assertTrue(check.execute(client).isEmpty());
+    }
+
+    @Test
+    public void createsInvestmentFamiliesWithCanonicalIdentityAndLinkedCash()
+    {
+        for (var type : List.of("buy", "sell", "delivery-inbound", "delivery-outbound"))
+        {
+            var body = investmentBody(type);
+            body.addProperty("note", "Investment");
+            var json = create(body);
+            var transaction = portfolio.getTransactions().getLast();
+            assertEquals(type, json.get("type").getAsString());
+            assertEquals(transaction.getUUID(), json.get("uuid").getAsString());
+            assertEquals(123456789L, transaction.getShares());
+            assertEquals(1234L, transaction.getAmount());
+            if (type.equals("buy") || type.equals("sell"))
+                assertTrue(transaction.getCrossEntry() instanceof BuySellEntry);
+            if (transaction.getCrossEntry() instanceof BuySellEntry entry)
+            {
+                var cash = entry.getAccountTransaction();
+                assertTrue(account.getTransactions().contains(cash));
+                assertSame(entry, cash.getCrossEntry());
+                assertSame(portfolio, entry.getPortfolio());
+                assertSame(account, entry.getAccount());
+                assertEquals(0L, cash.getShares());
+                assertEquals("Investment", cash.getNote());
+                assertEquals("Paired client", cash.getSource());
+                assertEquals(json, TransactionsHandler.get(client, cash.getUUID()));
+            }
+            assertEquals(json, TransactionsHandler.get(client, transaction.getUUID()));
+            assertCrossEntriesConsistent();
+        }
+        assertEquals(2, account.getTransactions().size());
+        assertEquals(4, dirty.get());
+    }
+
+    @Test
+    public void rejectsInvestmentRulesWithoutMutatingEitherOwner()
+    {
+        for (var type : List.of("buy", "sell", "delivery-inbound", "delivery-outbound"))
+        {
+            var body = investmentBody(type);
+            body.addProperty("shares", 0);
+            body.remove("instrument");
+            body.addProperty("grossValue", 12.34);
+            var error = rejected(body);
+            has(error, "shares", "shares-required");
+            has(error, "instrument", "instrument-required");
+            has(error, "grossValue", "unknown-field");
+            body = investmentBody(type);
+            body.getAsJsonObject("amount").addProperty("value", 0);
+            if (type.equals("delivery-outbound"))
+                assertEquals(0, create(body).getAsJsonObject("grossValue").get("value").getAsInt());
+            else
+                has(rejected(body), "amount", type.equals("sell") ? "use-outbound-delivery" : "gross-value-required");
+        }
+        for (var type : List.of("buy", "sell"))
+        {
+            var body = investmentBody(type);
+            body.getAsJsonObject("cashAccount").addProperty("uuid", "unknown");
+            has(rejected(body), "cashAccount", "unknown-entity");
+        }
+        portfolio.setReferenceAccount(null);
+        for (var type : List.of("delivery-inbound", "delivery-outbound"))
+            has(rejected(investmentBody(type)), "investmentAccount", "reference-account-required");
+    }
+
+    @Test
+    public void rejectsBuySellCurrencyDifferentFromCashAccountWithoutMutation()
+    {
+        account.setCurrencyCode("USD");
+        for (var type : List.of("buy", "sell"))
+        {
+            var error = rejected(investmentBody(type));
+            has(error, "amount.currency", "currency-mismatch");
+            assertEquals(1, error.getErrors().size());
+        }
+    }
+
+    @Test
+    public void deliveryCurrencyIsIndependentOfReferenceCashAccount()
+    {
+        account.setCurrencyCode("USD");
+        for (var type : List.of("delivery-inbound", "delivery-outbound"))
+        {
+            var json = create(investmentBody(type));
+            assertEquals("EUR", json.getAsJsonObject("amount").get("currency").getAsString());
+            assertEquals("EUR", portfolio.getTransactions().getLast().getCurrencyCode());
+        }
+        assertEquals(0, account.getTransactions().size());
+        assertEquals(2, dirty.get());
+    }
+
+    @Test
+    public void acceptsZeroNetOutboundDeliveryWithPositiveGross()
+    {
+        var body = investmentBody("delivery-outbound");
+        body.getAsJsonObject("amount").addProperty("value", 0);
+        body.add("units", JsonParser.parseString("""
+                        [{"type":"fee","amount":{"value":1,"currency":"EUR"}},
+                         {"type":"tax","amount":{"value":2,"currency":"EUR"}}]
+                        """));
+        assertEquals(3, create(body).getAsJsonObject("grossValue").get("value").getAsInt());
+        assertEquals(0, account.getTransactions().size());
+    }
+
+    @Test
+    public void validatesInvestmentForexGrossForEachFamily()
+    {
+        security.setCurrencyCode("USD");
+        for (var type : List.of("buy", "sell", "delivery-inbound", "delivery-outbound"))
+        {
+            var body = investmentBody(type);
+            body.getAsJsonObject("amount").addProperty("value", type.equals("buy") || type.equals("delivery-inbound") ? 81 : 79);
+            body.add("units", JsonParser.parseString("""
+                            [{"type":"gross-value","amount":{"value":80,"currency":"EUR"},
+                              "forex":{"value":100,"currency":"USD"},"exchangeRate":0.8},
+                             {"type":"fee","amount":{"value":1,"currency":"EUR"}}]
+                            """));
+            assertEquals(80, create(body).getAsJsonObject("grossValue").get("value").getAsInt());
+            assertCrossEntriesConsistent();
+            body.getAsJsonObject("amount").addProperty("value", 78.99);
+            has(rejected(body), "units", "gross-value-mismatch");
+        }
     }
 
     @Test
@@ -228,18 +384,29 @@ public class TransactionCreateTest
             var router = ApiRoutes.create(registry, host, null);
             var uri = "/v1/files/sample/transactions";
             var route = router.match("POST", uri);
-            var request = new Request("POST", uri, route.pathParams(), Map.of(),
-                            body("deposit").toString().getBytes(StandardCharsets.UTF_8),
-                            Request.Authorization.VALID, null, "Paired client");
-            host.setUserEditing(true);
-            var error = assertThrows(ApiException.class, () -> route.handler().handle(request));
-            assertEquals(423, error.getStatus());
-            assertEquals(0, account.getTransactions().size());
-            assertEquals(0, dirty.get());
-            host.setUserEditing(false);
-            var response = route.handler().handle(request);
-            assertEquals(201, response.status());
-            assertEquals(uri + "/" + account.getTransactions().getFirst().getUUID(), response.headers().get("Location"));
+            for (var type : List.of("deposit", "buy", "sell", "delivery-inbound", "delivery-outbound"))
+            {
+                var body = type.equals("deposit") ? body(type) : investmentBody(type);
+                var request = new Request("POST", uri, route.pathParams(), Map.of(),
+                                body.toString().getBytes(StandardCharsets.UTF_8),
+                                Request.Authorization.VALID, null, "Paired client");
+                int cashCount = account.getTransactions().size();
+                int investmentCount = portfolio.getTransactions().size();
+                int changes = dirty.get();
+                host.setUserEditing(true);
+                var error = assertThrows(ApiException.class, () -> route.handler().handle(request));
+                assertEquals(423, error.getStatus());
+                assertEquals(cashCount, account.getTransactions().size());
+                assertEquals(investmentCount, portfolio.getTransactions().size());
+                assertEquals(changes, dirty.get());
+                host.setUserEditing(false);
+                var response = route.handler().handle(request);
+                assertEquals(201, response.status());
+                var transaction = type.equals("deposit") ? account.getTransactions().getLast()
+                                : portfolio.getTransactions().getLast();
+                assertEquals(uri + "/" + transaction.getUUID(), response.headers().get("Location"));
+                assertEquals(changes + 1, dirty.get());
+            }
             assertFalse(host.hasAccessedOutsideUIThread());
         }
         finally

@@ -137,10 +137,16 @@ public final class TransactionsHandler
 
     public static JsonObject create(Client client, JsonObject body, String clientName)
     {
-        var input = new TransactionInput().cash(client, body, clientName);
-        new InsertAction(client).process(input.transaction(), input.account());
+        var event = new TransactionInput().parse(client, body, clientName);
+        var insert = new InsertAction(client);
+        if (event.transaction().getCrossEntry() instanceof BuySellEntry entry)
+            insert.process(entry, entry.getAccount(), entry.getPortfolio());
+        else if (event.transaction() instanceof PortfolioTransaction transaction)
+            insert.process(transaction, (Portfolio) event.owner());
+        else
+            insert.process((AccountTransaction) event.transaction(), (Account) event.owner());
         client.markDirty();
-        return EntityJson.toJson(new Event(input.account(), input.transaction())).getAsJsonObject();
+        return EntityJson.toJson(event).getAsJsonObject();
     }
 
     public static JsonElement list(Client client, String type, String from, String to, String instrument,
