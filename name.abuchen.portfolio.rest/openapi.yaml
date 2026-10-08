@@ -197,6 +197,8 @@ tags:
     description: The statement of assets — every holding valued at a date
   - name: Performance
     description: Return and value-change of the file over an interval
+  - name: Transactions
+    description: Stored transaction events, folding linked records.
   - name: Trades
     description: Matched buy/sell pairs, computed from the transactions
 
@@ -722,6 +724,105 @@ paths:
                     name: Broker
                     referenceCashAccount: c4b2a1e0-3f6d-4a2e-8b1c-5d7f9a0e2c46
                     note: Main brokerage
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/files/{file}/transactions:
+    parameters:
+      - $ref: "#/components/parameters/File"
+    get:
+      operationId: listTransactions
+      tags: [Transactions]
+      summary: List stored transaction events
+      description: |
+        One event per buy/sell or transfer, ordered by dateTime ascending, then canonical
+        uuid (an arbitrary but fixed tie-break). Filters combine with AND; account filters
+        match either transfer endpoint. from/to are inclusive calendar dates. Unknown
+        types, malformed dates, reversed ranges and unknown filter UUIDs return 400.
+      parameters:
+        - name: type
+          in: query
+          description: Comma-separated event types; omitted means all types.
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Earliest transaction date, inclusive (YYYY-MM-DD).
+          schema:
+            type: string
+        - name: to
+          in: query
+          description: Latest transaction date, inclusive (YYYY-MM-DD).
+          schema:
+            type: string
+        - name: instrument
+          in: query
+          description: Instrument UUID.
+          schema:
+            type: string
+        - name: cashAccount
+          in: query
+          description: Cash account UUID, including either transfer endpoint.
+          schema:
+            type: string
+        - name: investmentAccount
+          in: query
+          description: Investment account UUID, including either transfer endpoint.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All matching events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/files/{file}/transactions/{uuid}:
+    parameters:
+      - $ref: "#/components/parameters/File"
+      - $ref: "#/components/parameters/Uuid"
+    get:
+      operationId: getTransaction
+      tags: [Transactions]
+      summary: Read one transaction event
+      description: |
+        Either record UUID of a linked event resolves to its canonical event UUID.
+      responses:
+        "200":
+          description: The event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionEvent"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1583,6 +1684,308 @@ components:
         message:
           type: string
 
+    TransactionEvent:
+      description: |
+        A stored event, addressed by the investment-account record for buy/sell,
+        outgoing record for transfers, or the single record otherwise. Common
+        metadata and units come from that canonical record. Unknown future types
+        must be accepted by clients, without assuming their account fields.
+        An unlinked record uses its own UUID and has integrity: missing-counterpart.
+        Only its surviving account reference is present; amount and units belong
+        to that record, including for an incoming transfer. Missing counterparts
+        and their amounts are never inferred.
+      oneOf:
+        - $ref: "#/components/schemas/BuyTransaction"
+        - $ref: "#/components/schemas/SellTransaction"
+        - $ref: "#/components/schemas/DeliveryInboundTransaction"
+        - $ref: "#/components/schemas/DeliveryOutboundTransaction"
+        - $ref: "#/components/schemas/SecurityTransferTransaction"
+        - $ref: "#/components/schemas/CashTransferTransaction"
+        - $ref: "#/components/schemas/DepositTransaction"
+        - $ref: "#/components/schemas/RemovalTransaction"
+        - $ref: "#/components/schemas/InterestTransaction"
+        - $ref: "#/components/schemas/InterestChargeTransaction"
+        - $ref: "#/components/schemas/FeeTransaction"
+        - $ref: "#/components/schemas/FeeRefundTransaction"
+        - $ref: "#/components/schemas/TaxTransaction"
+        - $ref: "#/components/schemas/TaxRefundTransaction"
+        - $ref: "#/components/schemas/DividendTransaction"
+
+    TransactionFields:
+      type: object
+      required: [uuid, type, dateTime, shares, amount, grossValue, fees, taxes, units]
+      properties:
+        uuid:
+          type: string
+        type:
+          type: string
+          description: Event kind; clients must accept unknown future values.
+          x-extensible-enum: [buy, sell, delivery-inbound, delivery-outbound, security-transfer, cash-transfer, deposit, removal, interest, interest-charge, fee, fee-refund, tax, tax-refund, dividend]
+        dateTime:
+          type: [string, "null"]
+          description: Local date-time with seconds, YYYY-MM-DDTHH:MM:SS, without offset. Null when the stored record has no date; sorts last and is excluded by date filters.
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Canonical record's update instant; absent if unavailable.
+        integrity:
+          type: string
+          readOnly: true
+          x-extensible-enum: [missing-counterpart]
+          description: Present when a buy, sell or transfer record has no linked counterpart. Missing account references are omitted. Absent for complete events.
+        note:
+          type: string
+        source:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/InstrumentReference"
+        shares:
+          type: number
+          description: Stored shares, including zero for cash events; up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/MonetaryValue"
+        grossValue:
+          allOf:
+            - $ref: "#/components/schemas/MonetaryValue"
+          readOnly: true
+          description: Derived from amount and fees/taxes in the transaction currency.
+        fees:
+          $ref: "#/components/schemas/MonetaryValue"
+        taxes:
+          $ref: "#/components/schemas/MonetaryValue"
+        units:
+          type: array
+          description: Complete units of the canonical record; totals are positive magnitudes.
+          items:
+            $ref: "#/components/schemas/TransactionUnit"
+
+    TransactionUnit:
+      type: object
+      required: [type, amount]
+      properties:
+        type:
+          type: string
+          description: Unit kind; clients must preserve unknown future values.
+          x-extensible-enum: [gross-value, fee, tax]
+        amount:
+          $ref: "#/components/schemas/MonetaryValue"
+        forex:
+          $ref: "#/components/schemas/MonetaryValue"
+        exchangeRate:
+          type: number
+          description: Transaction-currency units per one forex-currency unit. Present together with forex.
+
+    CashAccountReference:
+      type: object
+      required: [uuid, name, currencyCode]
+      properties:
+        uuid:
+          type: string
+        name:
+          type: string
+        currencyCode:
+          type: string
+
+    BuyTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: buy
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+
+    SellTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: sell
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+
+    DeliveryInboundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [investmentAccount, instrument]
+          properties:
+            type:
+              const: delivery-inbound
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    DeliveryOutboundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [investmentAccount, instrument]
+          properties:
+            type:
+              const: delivery-outbound
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    SecurityTransferTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: security-transfer
+            fromInvestmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            toInvestmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    CashTransferTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: cash-transfer
+            fromCashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            toCashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            targetAmount:
+              $ref: "#/components/schemas/MonetaryValue"
+      description: For complete events, amount is outgoing cash and targetAmount is incoming cash in the destination currency. Forex units use the outgoing currency as amount and incoming currency as forex. With integrity missing-counterpart, amount belongs to the surviving record, only its fromCashAccount or toCashAccount is present, and targetAmount is omitted.
+
+    DepositTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: deposit
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    RemovalTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: removal
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    InterestTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: interest
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    InterestChargeTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: interest-charge
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    FeeTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: fee
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    FeeRefundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: fee-refund
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    TaxTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: tax
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    TaxRefundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: tax-refund
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    DividendTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount, instrument]
+          properties:
+            type:
+              const: dividend
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
     InstrumentReference:
       type: object
       description: |
@@ -2404,6 +2807,7 @@ components:
             - unknown-field
             - unknown-parameter
             - duplicate-parameter
+            - unknown-entity
             - unknown-currency
             - locked-by-transactions
             - exchange-rate-requires-currency

@@ -64,7 +64,7 @@ carries an `Origin` header is rejected — a web page cannot reach this API, by 
 
 ## The MCP endpoint
 
-`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, offering sixteen of the
+`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, offering eighteen of the
 operations above as named tools. Point a client at `http://127.0.0.1:5712/mcp` and give it an
 `Authorization: Bearer …` header — **Add client** assembles both, at the one moment the token
 exists. Same switch, same port, same tokens; there is nothing extra to install.
@@ -162,6 +162,31 @@ on a client's behalf. Watchlist and taxonomy membership do not block the delete.
 ```json
 {"uuid": "d9f0…", "name": "Broker", "referenceCashAccount": "c4b2…", "note": "…"}
 ```
+
+### `GET /v1/files/{file}/transactions[/{uuid}]`
+
+Returns stored **events**: a buy/sell or a transfer appears once, with both account references.
+The UUID is the investment-account record for a buy/sell, the outgoing record for a transfer,
+and the record itself otherwise. Either linked record UUID reads the same event. See
+[ADR 0006](../docs/adr/0006-a-transaction-is-an-event.md) for the identity decision.
+
+An unlinked buy, sell or transfer remains visible under its own UUID, with
+`integrity: "missing-counterpart"` and only its surviving account reference. Amounts and units
+belong to that record; for an incoming transfer, `amount` is incoming. Missing references and
+`targetAmount` are omitted.
+
+The list accepts `type` (comma-separated), inclusive calendar dates `from`/`to`, and entity UUIDs
+`instrument`, `cashAccount`, `investmentAccount`. Filters combine with AND; an account filter
+matches either transfer endpoint. Invalid values, reversed dates and unknown filter UUIDs return
+400. Events sort by `dateTime` ascending, then UUID; the tie-break is arbitrary but fixed.
+Records with no date return `dateTime: null`, sort last, and are excluded when `from` or `to` is supplied.
+
+Amounts keep their recorded currencies. `fees` and `taxes` are positive totals; `units` carries
+all stored fee, tax and forex detail. `grossValue` is derived. On a cash transfer, `amount` is
+outgoing and `targetAmount` is incoming; a forex unit's rate converts its `forex` into its `amount`.
+Transfer references are `fromCashAccount`/`toCashAccount` or
+`fromInvestmentAccount`/`toInvestmentAccount`. Common metadata comes from the canonical record.
+The complete response shapes and type vocabulary are in [openapi.yaml](openapi.yaml).
 
 ## Compatibility
 

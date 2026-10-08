@@ -73,8 +73,8 @@ public class McpToolsDriftTest
     @Test
     public void testTheSixteenToolsAreServed()
     {
-        assertThat(McpTools.all(), hasSize(16));
-        assertThat(McpTools.listPayload().size(), is(16));
+        assertThat(McpTools.all(), hasSize(18));
+        assertThat(McpTools.listPayload().size(), is(18));
     }
 
     @Test

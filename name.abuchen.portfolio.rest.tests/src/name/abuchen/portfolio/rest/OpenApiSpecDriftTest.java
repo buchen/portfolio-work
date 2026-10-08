@@ -66,7 +66,7 @@ public class OpenApiSpecDriftTest
      * what a client does with a value it does not know.
      */
     private static final Set<String> OPEN_ENUMS = Set.of("Problem.type", "FieldError.code", "TradeWarning.code",
-                    "AttributeDefinition.type", "Holding.type");
+                    "AttributeDefinition.type", "Holding.type", "TransactionFields.integrity", "TransactionFields.type", "TransactionUnit.type");
 
     /**
      * Response enums whose values are fixed for v1: binary by nature, a state

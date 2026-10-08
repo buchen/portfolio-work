@@ -30,3 +30,4 @@ One screen is the norm. Keep the argument, cut the exposition.
 | [0003](0003-sign-monetary-fields-only-inside-reconciling-breakdowns.md) | Sign monetary fields only inside reconciling breakdowns |
 | [0004](0004-derived-resources-have-no-synthetic-identity.md) | Derived resources have no synthetic identity |
 | [0005](0005-authenticate-the-mcp-endpoint-with-rest-api-tokens.md) | Authenticate `/mcp` with REST API bearer tokens |
+| [0006](0006-a-transaction-is-an-event.md) | A transaction is an event, addressed by one record’s uuid |

@@ -14,6 +14,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import name.abuchen.portfolio.model.Account;
+import name.abuchen.portfolio.model.AccountTransaction;
+import name.abuchen.portfolio.model.AccountTransferEntry;
+import name.abuchen.portfolio.model.BuySellEntry;
+import name.abuchen.portfolio.model.PortfolioTransaction;
+import name.abuchen.portfolio.model.PortfolioTransferEntry;
+import name.abuchen.portfolio.model.Transaction;
 import name.abuchen.portfolio.model.AttributeFieldType;
 import name.abuchen.portfolio.model.Client;
 import name.abuchen.portfolio.model.CostMethod;
@@ -608,6 +614,137 @@ public final class EntityJson
     private static JsonElement money(Money money)
     {
         return money != null ? toJson(money) : JsonNull.INSTANCE;
+    }
+
+    public static JsonObject toJson(TransactionsHandler.Event event)
+    {
+        var transaction = event.transaction();
+        var json = transactionFields(transaction, event.type());
+        if (event.unlinked())
+            unlinked(json, event);
+        else if (transaction.getCrossEntry() instanceof BuySellEntry entry)
+            buySell(json, entry);
+        else if (transaction.getCrossEntry() instanceof AccountTransferEntry entry)
+            cashTransfer(json, entry);
+        else if (transaction.getCrossEntry() instanceof PortfolioTransferEntry entry)
+            securityTransfer(json, entry);
+        else if (transaction instanceof PortfolioTransaction)
+            delivery(json, (Portfolio) event.owner());
+        else
+            cashTransaction(json, (Account) event.owner(), (AccountTransaction) transaction);
+        return json;
+    }
+
+    private static void unlinked(JsonObject json, TransactionsHandler.Event event)
+    {
+        // Preserve the surviving side and its direction without claiming that
+        // an incomplete transfer has an outgoing amount or a known counterpart.
+        json.addProperty("integrity", "missing-counterpart"); //$NON-NLS-1$ //$NON-NLS-2$
+        if (event.transaction() instanceof AccountTransaction cash)
+        {
+            var field = switch (cash.getType())
+            {
+                case TRANSFER_IN -> "toCashAccount"; //$NON-NLS-1$
+                case TRANSFER_OUT -> "fromCashAccount"; //$NON-NLS-1$
+                default -> "cashAccount"; //$NON-NLS-1$
+            };
+            json.add(field, reference((Account) event.owner()));
+            if (cash.getExDate() != null)
+                json.addProperty("exDate", DATE_TIME.format(cash.getExDate())); //$NON-NLS-1$
+        }
+        else
+        {
+            var field = switch (((PortfolioTransaction) event.transaction()).getType())
+            {
+                case TRANSFER_IN -> "toInvestmentAccount"; //$NON-NLS-1$
+                case TRANSFER_OUT -> "fromInvestmentAccount"; //$NON-NLS-1$
+                default -> "investmentAccount"; //$NON-NLS-1$
+            };
+            json.add(field, reference((Portfolio) event.owner()));
+        }
+    }
+
+    private static JsonObject transactionFields(Transaction transaction, String type)
+    {
+        var json = new JsonObject();
+        json.addProperty("uuid", transaction.getUUID()); //$NON-NLS-1$
+        json.addProperty("type", type); //$NON-NLS-1$
+        if (transaction.getDateTime() == null)
+            json.add("dateTime", JsonNull.INSTANCE); //$NON-NLS-1$
+        else
+            json.addProperty("dateTime", DATE_TIME.format(transaction.getDateTime())); //$NON-NLS-1$
+        if (transaction.getNote() != null)
+            json.addProperty("note", transaction.getNote()); //$NON-NLS-1$
+        if (transaction.getSource() != null)
+            json.addProperty("source", transaction.getSource()); //$NON-NLS-1$
+        if (transaction.getUpdatedAt() != null)
+            json.addProperty("updatedAt", transaction.getUpdatedAt().toString()); //$NON-NLS-1$
+        if (transaction.getSecurity() != null)
+            json.add("instrument", reference(transaction.getSecurity())); //$NON-NLS-1$
+        json.add("shares", decimal(transaction.getShares(), Values.Share.precision())); //$NON-NLS-1$
+        json.add("amount", toJson(transaction.getMonetaryAmount())); //$NON-NLS-1$
+        json.add("grossValue", toJson(transaction.getGrossValue())); //$NON-NLS-1$
+        json.add("fees", toJson(transaction.getUnitSum(Transaction.Unit.Type.FEE))); //$NON-NLS-1$
+        json.add("taxes", toJson(transaction.getUnitSum(Transaction.Unit.Type.TAX))); //$NON-NLS-1$
+        var units = new JsonArray();
+        transaction.getUnits().forEach(unit -> {
+            var value = new JsonObject();
+            value.addProperty("type", switch (unit.getType()) //$NON-NLS-1$
+            {
+                case GROSS_VALUE -> "gross-value"; //$NON-NLS-1$
+                case FEE -> "fee"; //$NON-NLS-1$
+                case TAX -> "tax"; //$NON-NLS-1$
+            });
+            value.add("amount", toJson(unit.getAmount())); //$NON-NLS-1$
+            if (unit.getForex() != null)
+            {
+                value.add("forex", toJson(unit.getForex())); //$NON-NLS-1$
+                value.add("exchangeRate", decimal(unit.getExchangeRate())); //$NON-NLS-1$
+            }
+            units.add(value);
+        });
+        json.add("units", units); //$NON-NLS-1$
+        return json;
+    }
+
+    private static void buySell(JsonObject json, BuySellEntry entry)
+    {
+        json.add("investmentAccount", reference(entry.getPortfolio())); //$NON-NLS-1$
+        json.add("cashAccount", reference(entry.getAccount())); //$NON-NLS-1$
+    }
+
+    private static void delivery(JsonObject json, Portfolio portfolio)
+    {
+        json.add("investmentAccount", reference(portfolio)); //$NON-NLS-1$
+    }
+
+    private static void cashTransaction(JsonObject json, Account account, AccountTransaction transaction)
+    {
+        json.add("cashAccount", reference(account)); //$NON-NLS-1$
+        if (transaction.getExDate() != null)
+            json.addProperty("exDate", DATE_TIME.format(transaction.getExDate())); //$NON-NLS-1$
+    }
+
+    private static void cashTransfer(JsonObject json, AccountTransferEntry entry)
+    {
+        json.add("fromCashAccount", reference(entry.getSourceAccount())); //$NON-NLS-1$
+        json.add("toCashAccount", reference(entry.getTargetAccount())); //$NON-NLS-1$
+        json.add("targetAmount", toJson(entry.getTargetTransaction().getMonetaryAmount())); //$NON-NLS-1$
+    }
+
+    private static void securityTransfer(JsonObject json, PortfolioTransferEntry entry)
+    {
+        json.add("fromInvestmentAccount", reference(entry.getSourcePortfolio())); //$NON-NLS-1$
+        json.add("toInvestmentAccount", reference(entry.getTargetPortfolio())); //$NON-NLS-1$
+    }
+
+    private static JsonObject reference(Account account)
+    {
+        var json = new JsonObject();
+        json.addProperty("uuid", account.getUUID()); //$NON-NLS-1$
+        json.addProperty("name", account.getName()); //$NON-NLS-1$
+        json.addProperty("currencyCode", account.getCurrencyCode()); //$NON-NLS-1$
+        return json;
     }
 
     public static JsonObject toJson(Portfolio portfolio)
