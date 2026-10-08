@@ -740,6 +740,49 @@ paths:
   /v1/files/{file}/transactions:
     parameters:
       - $ref: "#/components/parameters/File"
+    post:
+      operationId: createTransaction
+      tags: [Transactions]
+      summary: Create a cash-account transaction event
+      description: |
+        Creates an event in memory and marks the file dirty; does not save it.
+        References must already exist. All invalid or unknown fields are reported
+        together with 422, without inserting any records. Fees, taxes and grossValue
+        are read-only; use units for charges and foreign-currency detail.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCashTransaction"
+      responses:
+        "201":
+          description: Created transaction
+          headers:
+            Location:
+              description: Path of the created event.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "500":
+          $ref: "#/components/responses/InternalError"
     get:
       operationId: listTransactions
       tags: [Transactions]
@@ -1759,6 +1802,84 @@ components:
           description: Complete units of the canonical record; totals are positive magnitudes.
           items:
             $ref: "#/components/schemas/TransactionUnit"
+
+    CreateCashTransaction:
+      type: object
+      additionalProperties: false
+      required: [type, dateTime, cashAccount, amount]
+      properties:
+        type:
+          type: string
+          enum: [deposit, removal, interest, interest-charge, fee, fee-refund, tax, tax-refund, dividend]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+          description: Required for dividends; optional for fee/tax families; otherwise forbidden.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Net amount; zero is allowed when derived gross remains positive.
+        shares:
+          type: number
+          minimum: 0
+          description: Up to eight decimal places; nonzero only for dividends. Defaults to zero.
+        exDate:
+          type: [string, "null"]
+          description: Local YYYY-MM-DDTHH:MM:SS; requires an instrument and cannot have a later date than dateTime.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fee units only for dividends; tax units for dividends or interest. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    TransactionEntityInput:
+      type: object
+      additionalProperties: false
+      required: [uuid]
+      properties:
+        uuid:
+          type: string
+          description: UUID of an existing entity in this file.
+
+    TransactionMoneyInput:
+      type: object
+      additionalProperties: false
+      required: [value, currency]
+      properties:
+        value:
+          type: number
+          minimum: 0
+          description: Two decimal places, independent of currency; extra trailing zeros accepted. Must fit the model's signed 64-bit cents.
+        currency:
+          type: string
+          description: Known currency code.
+
+    TransactionUnitInput:
+      type: object
+      additionalProperties: false
+      required: [type, amount]
+      properties:
+        type:
+          type: string
+          enum: [gross-value, fee, tax]
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Amount in the transaction currency; a gross-value unit must equal the derived gross exactly.
+        forex:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Foreign amount in the instrument currency; required for gross-value units and whenever exchangeRate is given.
+        exchangeRate:
+          type: number
+          exclusiveMinimum: 0
+          description: Transaction-currency units per forex unit; required together with forex. Same-currency gross-value units are forbidden.
 
     TransactionUnit:
       type: object

@@ -188,7 +188,7 @@ public class RestApiAddon
         try
         {
             var host = new Host();
-            server = new RestApiServer(port, token -> clientStore.authenticate(token).isPresent(),
+            server = new RestApiServer(port, clientStore::authenticate,
                             ApiRoutes.create(registry, host, new PairingService(clientStore, host)));
             server.start();
             PortfolioLog.info(MessageFormat.format(Messages.MsgRestApiServerStarted, server.getPort()));

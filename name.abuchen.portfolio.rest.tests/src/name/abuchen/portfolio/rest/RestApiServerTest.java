@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 
 import org.junit.After;
 import org.junit.Before;
@@ -45,7 +46,9 @@ public class RestApiServerTest
         router.add("GET", "/v1/auth/requests/{id}",
                         request -> Response.json(200, JsonParser.parseString("{\"status\":\"pending\"}")));
 
-        server = new RestApiServer(0, TOKEN::equals, router);
+        server = new RestApiServer(0, token -> TOKEN.equals(token)
+                        ? Optional.of(new ClientStore.ApiClient("test", "Test client", null, null, true))
+                        : Optional.empty(), router);
         server.start();
         http = HttpClient.newHttpClient();
     }

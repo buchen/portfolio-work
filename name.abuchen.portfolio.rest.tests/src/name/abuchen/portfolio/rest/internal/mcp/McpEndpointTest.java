@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
@@ -64,7 +65,9 @@ public class McpEndpointTest
                         new PairingService(new ClientStore(Path.of("target", "unused-client-store")), host));
 
         RejectedConnections.clear();
-        server = new RestApiServer(0, TOKEN::equals, router);
+        server = new RestApiServer(0, token -> TOKEN.equals(token)
+                        ? Optional.of(new ClientStore.ApiClient("test", "Test client", null, null, true))
+                        : Optional.empty(), router);
         server.start();
         http = HttpClient.newHttpClient();
     }

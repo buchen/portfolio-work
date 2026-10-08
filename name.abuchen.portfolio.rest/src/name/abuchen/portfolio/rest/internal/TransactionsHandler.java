@@ -10,6 +10,9 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
+import name.abuchen.portfolio.datatransfer.actions.InsertAction;
 
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.AccountTransaction;
@@ -130,6 +133,14 @@ public final class TransactionsHandler
     public static JsonElement get(Client client, String uuid)
     {
         return EntityJson.toJson(find(client, uuid));
+    }
+
+    public static JsonObject create(Client client, JsonObject body, String clientName)
+    {
+        var input = new TransactionInput().cash(client, body, clientName);
+        new InsertAction(client).process(input.transaction(), input.account());
+        client.markDirty();
+        return EntityJson.toJson(new Event(input.account(), input.transaction())).getAsJsonObject();
     }
 
     public static JsonElement list(Client client, String type, String from, String to, String instrument,

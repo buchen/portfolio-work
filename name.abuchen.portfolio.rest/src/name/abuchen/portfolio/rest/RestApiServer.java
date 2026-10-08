@@ -4,10 +4,11 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.function.Predicate;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -47,16 +48,16 @@ public class RestApiServer
     private static final int MAX_REQUEST_BODY = 1024 * 1024;
 
     private final int port;
-    private final Predicate<String> tokenValidator;
+    private final Function<String, Optional<ClientStore.ApiClient>> authenticator;
     private final Router router;
 
     private HttpServer server;
     private ExecutorService executor;
 
-    public RestApiServer(int port, Predicate<String> tokenValidator, Router router)
+    public RestApiServer(int port, Function<String, Optional<ClientStore.ApiClient>> authenticator, Router router)
     {
         this.port = port;
-        this.tokenValidator = tokenValidator;
+        this.authenticator = authenticator;
         this.router = router;
     }
 
@@ -98,8 +99,8 @@ public class RestApiServer
                 var match = router.match(exchange.getRequestMethod(), exchange.getRequestURI().getPath());
                 var request = new Request(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
                                 match.pathParams(), Request.parseQuery(exchange.getRequestURI().getRawQuery()),
-                                readBody(exchange), authorization,
-                                exchange.getRequestHeaders().getFirst("User-Agent")); //$NON-NLS-1$
+                                readBody(exchange), authorization.status(),
+                                exchange.getRequestHeaders().getFirst("User-Agent"), authorization.clientName()); //$NON-NLS-1$
                 response = match.handler().handle(request);
             }
             catch (ApiException e)
@@ -186,6 +187,10 @@ public class RestApiServer
             throw ApiException.forbiddenOrigin();
     }
 
+    private record Authentication(Request.Authorization status, String clientName)
+    {
+    }
+
     /**
      * Decides whether the caller may proceed, and hands the handler what it
      * needs to decide the rest.
@@ -199,19 +204,23 @@ public class RestApiServer
      * here either. A token-free {@code initialize} is answered, not refused,
      * and only the handler knows whether the call needed a token.
      */
-    private Request.Authorization checkAuthorization(HttpExchange exchange)
+    private Authentication checkAuthorization(HttpExchange exchange)
     {
         var path = exchange.getRequestURI().getPath();
         var header = exchange.getRequestHeaders().getFirst("Authorization"); //$NON-NLS-1$
         var presented = header != null && header.startsWith("Bearer "); //$NON-NLS-1$
 
-        if (presented && tokenValidator.test(header.substring("Bearer ".length()))) //$NON-NLS-1$
-            return Request.Authorization.VALID;
+        if (presented)
+        {
+            var client = authenticator.apply(header.substring("Bearer ".length())); //$NON-NLS-1$
+            if (client.isPresent())
+                return new Authentication(Request.Authorization.VALID, client.get().name());
+        }
 
         var authorization = presented ? Request.Authorization.INVALID : Request.Authorization.MISSING;
 
         if (isAuthExempt(path) || RestApiConstants.MCP_ENDPOINT.equals(path))
-            return authorization;
+            return new Authentication(authorization, null);
 
         // a wrong token never becomes an entry in the client list, so this
         // record is the only trace the user will have of it

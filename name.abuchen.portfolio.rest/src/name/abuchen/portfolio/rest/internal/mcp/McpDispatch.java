@@ -30,7 +30,7 @@ public final class McpDispatch
     {
     }
 
-    public static Response call(Router router, McpTool tool, JsonObject arguments) throws Exception
+    public static Response call(Router router, McpTool tool, JsonObject arguments, Request caller) throws Exception
     {
         var path = tool.pathTemplate();
         var query = new LinkedHashMap<String, String>();
@@ -67,13 +67,13 @@ public final class McpDispatch
         }
 
         return route(router, tool.method(), path, query,
-                        hasBody ? body.toString().getBytes(StandardCharsets.UTF_8) : new byte[0]);
+                        hasBody ? body.toString().getBytes(StandardCharsets.UTF_8) : new byte[0], caller);
     }
 
     /** the shared files, for disambiguating a 404: a call in this process, not an HTTP round trip */
-    public static List<McpExplain.FileSummary> listFiles(Router router) throws Exception
+    public static List<McpExplain.FileSummary> listFiles(Router router, Request caller) throws Exception
     {
-        var response = route(router, "GET", "/v1/files", Map.of(), new byte[0]); //$NON-NLS-1$ //$NON-NLS-2$
+        var response = route(router, "GET", "/v1/files", Map.of(), new byte[0], caller); //$NON-NLS-1$ //$NON-NLS-2$
         var payload = JsonParser.parseString(new String(response.body(), StandardCharsets.UTF_8));
 
         var files = new ArrayList<McpExplain.FileSummary>();
@@ -88,15 +88,13 @@ public final class McpDispatch
         return files;
     }
 
-    private static Response route(Router router, String method, String path, Map<String, String> query, byte[] body)
+    private static Response route(Router router, String method, String path, Map<String, String> query, byte[] body,
+                    Request caller)
                     throws Exception
     {
         var match = router.match(method, path);
-        // the five-argument constructor is the authenticated one, and a /v1
-        // route never consults the flag anyway. It does not carry *which*
-        // client called: once tokens can be restricted, the caller
-        // must be passed through here, or every tool call bypasses the check
-        return match.handler().handle(new Request(method, path, match.pathParams(), query, body));
+        return match.handler().handle(new Request(method, path, match.pathParams(), query, body,
+                        caller.authorization(), caller.userAgent(), caller.clientName()));
     }
 
     /** the value as the wire wants it, without JSON quoting around a string */

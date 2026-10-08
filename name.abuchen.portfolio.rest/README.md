@@ -188,6 +188,22 @@ Transfer references are `fromCashAccount`/`toCashAccount` or
 `fromInvestmentAccount`/`toInvestmentAccount`. Common metadata comes from the canonical record.
 The complete response shapes and type vocabulary are in [openapi.yaml](openapi.yaml).
 
+### `POST /v1/files/{file}/transactions`
+
+Creates a cash-account event and returns it with `201` and a `Location` header.
+Supported types are deposit, removal, interest, interest-charge, fee, fee-refund,
+tax, tax-refund and dividend. Entity references contain only `uuid`; accounts and
+instruments must already exist. See the request schema in [openapi.yaml](openapi.yaml).
+
+Money uses exactly representable two-decimal values and shares up to eight decimals;
+extra trailing zeros are accepted. Dates require local `YYYY-MM-DDTHH:MM:SS` without
+an offset. `source` defaults to the paired client's name when omitted. Fees, taxes
+and foreign-currency detail are supplied through `units`; top-level `fees`, `taxes`
+and `grossValue` are read-only. The server validates a forex gross-value unit against
+the gross derived from the net amount and charges, without adjusting any numbers.
+Validation reports all applicable errors together with 422 and leaves the file unchanged.
+Transaction creation is currently available through REST only.
+
 ## Compatibility
 
 Everything under `/v1` is additive: nothing changes meaning, changes type or disappears, and a

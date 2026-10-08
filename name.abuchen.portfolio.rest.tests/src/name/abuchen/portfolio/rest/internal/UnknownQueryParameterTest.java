@@ -12,6 +12,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
@@ -207,7 +208,9 @@ public class UnknownQueryParameterTest
     @Test
     public void testTheReportedRequestFailsOverHttp() throws Exception
     {
-        server = new RestApiServer(0, TOKEN::equals, router);
+        server = new RestApiServer(0, token -> TOKEN.equals(token)
+                        ? Optional.of(new ClientStore.ApiClient("test", "Test client", null, null, true))
+                        : Optional.empty(), router);
         server.start();
         http = HttpClient.newHttpClient();
 

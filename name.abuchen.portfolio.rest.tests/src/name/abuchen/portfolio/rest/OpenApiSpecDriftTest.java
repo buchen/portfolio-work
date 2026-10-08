@@ -79,6 +79,9 @@ public class OpenApiSpecDriftTest
                     "InstrumentPerformanceContext.costMethod", "InstrumentPerformanceContext.taxesAndFees",
                     "InstrumentPerformanceContext.metrics");
 
+    /** Request bodies reject unknown enum values; accepting new values is additive. */
+    private static final Set<String> REQUEST_ENUMS = Set.of("CreateCashTransaction.type", "TransactionUnitInput.type");
+
     private IEclipsePreferences node;
 
     @Before
@@ -131,16 +134,19 @@ public class OpenApiSpecDriftTest
     /**
      * Adding a value to a closed enum breaks a client generated from the
      * document, adding one to an open enum does not - so every response enum
-     * has to be classified deliberately rather than defaulting to closed. A
-     * new enum fails here until it is added to one of the two lists.
+     * has to be classified deliberately rather than defaulting to closed.
+     * Request-only schema enums are classified separately because their values
+     * describe accepted input, not response values a client must understand.
      */
     @Test
-    public void testEveryResponseEnumIsClassifiedOpenOrClosed() throws IOException
+    public void testEverySchemaEnumIsClassifiedAsOpenClosedOrRequest() throws IOException
     {
         assertThat("response enums marked x-extensible-enum", documentedSchemaEnums("x-extensible-enum:"),
                         is(new TreeSet<>(OPEN_ENUMS)));
-        assertThat("response enums marked enum (closed for v1)", documentedSchemaEnums("enum:"),
-                        is(new TreeSet<>(CLOSED_ENUMS)));
+        var closedOrRequest = new TreeSet<>(CLOSED_ENUMS);
+        closedOrRequest.addAll(REQUEST_ENUMS);
+        assertThat("closed response enums and accepted request values", documentedSchemaEnums("enum:"),
+                        is(closedOrRequest));
     }
 
     @Test
@@ -537,8 +543,8 @@ public class OpenApiSpecDriftTest
 
     /**
      * The properties under {@code components/schemas} that carry the given
-     * enum keyword, as "Schema.property". Request enums live in parameters,
-     * not schemas, so this is exactly the set of enums a response can carry.
+     * enum keyword, as "Schema.property". Includes reusable request-body
+     * schemas as well as response schemas; parameter enums are outside this set.
      */
     private Set<String> documentedSchemaEnums(String keyword) throws IOException
     {

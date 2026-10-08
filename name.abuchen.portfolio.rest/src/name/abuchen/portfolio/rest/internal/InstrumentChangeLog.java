@@ -10,9 +10,7 @@ import name.abuchen.portfolio.rest.Messages;
  * Records the mutations the REST API applies to an instrument as a
  * human-readable entry in the application log, so the desktop user can see in
  * the Error Log view what the API changed. Entries are attributed generically
- * to "REST API"; naming the individual paired client is a deliberate follow-up
- * that first requires threading the authenticated client identity through the
- * request pipeline (today the token is validated as a boolean only).
+ * to "REST API".
  */
 public final class InstrumentChangeLog
 {
