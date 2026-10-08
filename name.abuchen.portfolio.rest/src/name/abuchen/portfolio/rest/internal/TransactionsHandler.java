@@ -12,6 +12,7 @@ import java.util.stream.Stream;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import name.abuchen.portfolio.datatransfer.TransactionEditor;
 import name.abuchen.portfolio.datatransfer.actions.InsertAction;
 
 import name.abuchen.portfolio.model.Account;
@@ -29,10 +30,6 @@ import name.abuchen.portfolio.model.TransactionOwner;
 /** Stored records folded into the events that the transaction dialogs edit. */
 public final class TransactionsHandler
 {
-    private static final Set<String> TYPES = Set.of("buy", "sell", "delivery-inbound", "delivery-outbound", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-                    "security-transfer", "cash-transfer", "deposit", "removal", "interest", "interest-charge", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
-                    "fee", "fee-refund", "tax", "tax-refund", "dividend"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
-
     private TransactionsHandler()
     {
     }
@@ -41,41 +38,14 @@ public final class TransactionsHandler
     {
         String type()
         {
-            if (transaction.getCrossEntry() instanceof AccountTransferEntry)
-                return "cash-transfer"; //$NON-NLS-1$
-            if (transaction.getCrossEntry() instanceof PortfolioTransferEntry)
-                return "security-transfer"; //$NON-NLS-1$
-            if (transaction instanceof PortfolioTransaction t)
-                return switch (t.getType())
-                {
-                    case BUY -> "buy"; //$NON-NLS-1$
-                    case SELL -> "sell"; //$NON-NLS-1$
-                    case DELIVERY_INBOUND -> "delivery-inbound"; //$NON-NLS-1$
-                    case DELIVERY_OUTBOUND -> "delivery-outbound"; //$NON-NLS-1$
-                    case TRANSFER_IN, TRANSFER_OUT -> "security-transfer"; //$NON-NLS-1$
-                };
-            return switch (((AccountTransaction) transaction).getType())
-            {
-                case DEPOSIT -> "deposit"; //$NON-NLS-1$
-                case REMOVAL -> "removal"; //$NON-NLS-1$
-                case INTEREST -> "interest"; //$NON-NLS-1$
-                case INTEREST_CHARGE -> "interest-charge"; //$NON-NLS-1$
-                case DIVIDENDS -> "dividend"; //$NON-NLS-1$
-                case FEES -> "fee"; //$NON-NLS-1$
-                case FEES_REFUND -> "fee-refund"; //$NON-NLS-1$
-                case TAXES -> "tax"; //$NON-NLS-1$
-                case TAX_REFUND -> "tax-refund"; //$NON-NLS-1$
-                case BUY -> "buy"; //$NON-NLS-1$
-                case SELL -> "sell"; //$NON-NLS-1$
-                case TRANSFER_IN, TRANSFER_OUT -> "cash-transfer"; //$NON-NLS-1$
-            };
+            return TransactionType.of(transaction).wireName;
         }
 
         boolean unlinked()
         {
-            return transaction.getCrossEntry() == null && switch (type())
+            return transaction.getCrossEntry() == null && switch (TransactionType.of(transaction).family)
             {
-                case "buy", "sell", "cash-transfer", "security-transfer" -> true; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+                case TRADE, CASH_TRANSFER, SECURITY_TRANSFER -> true;
                 default -> false;
             };
         }
@@ -176,6 +146,25 @@ public final class TransactionsHandler
         return transaction.getUUID();
     }
 
+    public record PatchResult(JsonObject entity, boolean changed)
+    {
+    }
+
+    public static PatchResult patch(Client client, String uuid, JsonObject body)
+    {
+        var event = find(client, uuid);
+        if (event.unlinked())
+            throw ApiException.conflict("incomplete-event", "Transaction is missing its counterpart", null, List.of()); //$NON-NLS-1$ //$NON-NLS-2$
+        var target = new TransactionInput().patch(client, event, body);
+        var result = TransactionEditor.apply(event.owner(), event.transaction(), target.owner(), target.transaction());
+        if (!result.errors().isEmpty())
+            throw ApiException.validation(result.errors().stream().map(status -> new ApiException.FieldError(
+                            status.getField(), status.getRuleCode(), "transaction violates " + status.getRuleCode())).toList()); //$NON-NLS-1$
+        if (result.changed())
+            client.markDirty();
+        return new PatchResult(EntityJson.toJson(event), result.changed());
+    }
+
     public static JsonElement list(Client client, String type, String from, String to, String instrument,
                     String cashAccount, String investmentAccount)
     {
@@ -184,7 +173,7 @@ public final class TransactionsHandler
         if (type != null)
             for (var value : type.split(",", -1)) //$NON-NLS-1$
             {
-                if (!TYPES.contains(value))
+                if (TransactionType.fromWire(value) == null)
                     errors.add(new ApiException.FieldError("type", "invalid-value", "unknown transaction type: " + value)); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
                 else
                     types.add(value);

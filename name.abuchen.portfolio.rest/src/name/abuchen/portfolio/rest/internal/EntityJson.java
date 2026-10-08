@@ -689,12 +689,7 @@ public final class EntityJson
         var units = new JsonArray();
         transaction.getUnits().forEach(unit -> {
             var value = new JsonObject();
-            value.addProperty("type", switch (unit.getType()) //$NON-NLS-1$
-            {
-                case GROSS_VALUE -> "gross-value"; //$NON-NLS-1$
-                case FEE -> "fee"; //$NON-NLS-1$
-                case TAX -> "tax"; //$NON-NLS-1$
-            });
+            value.addProperty("type", TransactionUnitType.toWire(unit.getType())); //$NON-NLS-1$
             value.add("amount", toJson(unit.getAmount())); //$NON-NLS-1$
             if (unit.getForex() != null)
             {

@@ -23,3 +23,8 @@ lets callers follow record references without knowing the model's canonicalizati
 Lists contain one item per event. Ownership filters must inspect both endpoints before deciding
 whether an event matches. Metadata comes from the canonical record; this API does not conceal
 linked identity by inventing another record or expose the halves as independent resources.
+
+Edits retain both records and their UUIDs, links and investment-plan associations. Event type
+and owners are immutable: moving an event requires explicit deletion and creation, including
+the deletion safeguards. This avoids presenting a move as an ordinary edit when the dialogs
+implement it by replacing records and removing their plan associations.

@@ -51,6 +51,7 @@ public class McpToolsDriftTest
                     "POST /v1/auth/requests", //
                     "POST /v1/files/{file}/transactions", // transaction writes are deliberately REST-only
                     "DELETE /v1/files/{file}/transactions/{uuid}",
+                    "PATCH /v1/files/{file}/transactions/{uuid}",
                     "GET /v1/auth/requests/{id}");
 
     private static final Pattern TOOL_NAME = Pattern.compile("pp_[a-z0-9_]+");

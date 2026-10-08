@@ -49,6 +49,9 @@ public class OpenApiSpecDriftTest
      */
     private static final Pattern FIELD_ERROR_CODE = Pattern.compile("FieldError\\(\\s*[^,]+,\\s*\"([a-z-]+)\"");
 
+    // TransactionInput.error forwards these literal codes to FieldError.
+    private static final Pattern TRANSACTION_ERROR_CODE = Pattern.compile("error\\(\\s*[^,]+,\\s*\"([a-z-]+)\"");
+
     private static final Pattern STATUS_CODE = Pattern.compile("[1-5][0-9][0-9]");
 
     /**
@@ -82,7 +85,9 @@ public class OpenApiSpecDriftTest
     /** Request bodies reject unknown enum values; accepting new values is additive. */
     private static final Set<String> REQUEST_ENUMS = Set.of("CreateCashTransaction.type",
                     "CreateBuySellTransaction.type", "CreateDeliveryTransaction.type", "CreateCashTransfer.type",
-                    "CreateSecurityTransfer.type", "TransactionUnitInput.type");
+                    "CreateSecurityTransfer.type", "TransactionUnitInput.type", "PatchCashTransaction.type",
+                    "PatchBuySellTransaction.type", "PatchDeliveryTransaction.type", "PatchCashTransfer.type",
+                    "PatchSecurityTransfer.type");
 
     private IEclipsePreferences node;
 
@@ -499,6 +504,12 @@ public class OpenApiSpecDriftTest
             var matcher = FIELD_ERROR_CODE.matcher(Files.readString(path));
             while (matcher.find())
                 codes.add(matcher.group(1));
+            if (path.getFileName().toString().equals("TransactionInput.java"))
+            {
+                matcher = TRANSACTION_ERROR_CODE.matcher(Files.readString(path));
+                while (matcher.find())
+                    codes.add(matcher.group(1));
+            }
         }
 
         if (codes.isEmpty())

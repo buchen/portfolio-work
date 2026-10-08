@@ -120,6 +120,35 @@ public class TransactionCreateTest
         return body;
     }
 
+    @Test
+    public void everyEventTypeCanBeCreatedFilteredAndPatched()
+    {
+        for (var type : TransactionType.values())
+        {
+            var body = switch (type.family)
+            {
+                case TRADE, DELIVERY -> investmentBody(type.wireName);
+                case CASH_TRANSFER, SECURITY_TRANSFER -> transferBody(type.wireName);
+                case CASH -> body(type.wireName);
+            };
+            if (type == TransactionType.DIVIDEND)
+                instrument(body);
+            var created = create(body);
+            assertEquals(type.wireName, created.get("type").getAsString());
+            var listed = TransactionsHandler.list(client, type.wireName, null, null, null, null, null)
+                            .getAsJsonObject().getAsJsonArray("items");
+            assertEquals(1, listed.size());
+            assertEquals(created, listed.get(0));
+            var patch = new JsonObject();
+            for (var field : type.family.fields())
+                if (created.has(field))
+                    patch.add(field, body.has(field) ? body.get(field) : created.get(field));
+            var result = TransactionsHandler.patch(client, created.get("uuid").getAsString(), patch);
+            assertFalse(result.changed());
+            assertEquals(created, result.entity());
+        }
+    }
+
     private void assertCrossEntriesConsistent()
     {
         var check = ServiceLoader.load(Check.class, Check.class.getClassLoader()).stream()

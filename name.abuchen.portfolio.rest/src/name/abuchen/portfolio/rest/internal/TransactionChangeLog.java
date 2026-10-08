@@ -22,4 +22,9 @@ public final class TransactionChangeLog
     {
         PortfolioLog.info(MessageFormat.format(Messages.MsgApiTransactionDeleted, uuid, fileLabel), List.of());
     }
+
+    public static void recordChange(String fileLabel, String uuid)
+    {
+        PortfolioLog.info(MessageFormat.format(Messages.MsgApiTransactionChanged, uuid, fileLabel), List.of());
+    }
 }

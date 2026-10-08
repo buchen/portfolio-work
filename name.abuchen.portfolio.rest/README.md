@@ -212,6 +212,26 @@ the gross derived from the net amount and charges, without adjusting any numbers
 Validation reports all applicable errors together with 422 and leaves the file unchanged.
 Transaction creation is currently available through REST only.
 
+### `PATCH /v1/files/{file}/transactions/{uuid}`
+
+Edits the whole event through either linked record UUID, returning the updated canonical event.
+Uses JSON Merge Patch: omitted fields stay unchanged, `null` removes optional values, nested
+objects merge, and `units` replaces the complete array. The complete result must satisfy the
+creation rules, including any existing data the request leaves untouched. All errors return
+together with 422 before any record changes.
+
+An event marked `integrity: "missing-counterpart"` returns `409 incomplete-event` on PATCH.
+It can be deleted through the API or repaired in the application. A missing date must be supplied
+by the patch for the complete event to pass validation.
+
+`type` and account owners cannot change (`immutable-field`); repeating their existing values is
+allowed. Record UUIDs, cross-entry links and investment-plan membership are preserved. A move
+requires DELETE and POST, subject to the deletion safeguard below. Read-only fields, including
+reference names and top-level `grossValue`, return `unknown-field` even when unchanged or `null`.
+An omitted `source` keeps its recorded value; `null` clears it. A valid edit that changes nothing
+does not change timestamps, mark the file dirty or write a log entry. Editing is available through
+REST only. The per-family patch schemas are in [openapi.yaml](openapi.yaml).
+
 ### `DELETE /v1/files/{file}/transactions/{uuid}`
 
 Deletes the whole event with `204 No Content`; either linked record UUID removes both
