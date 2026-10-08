@@ -41,11 +41,20 @@ public interface ImportAction
 
         private Code code;
         private String message;
+        private String ruleCode;
+        private String field;
 
         public Status(Code code, String message)
         {
+            this(code, message, null, null);
+        }
+
+        public Status(Code code, String message, String ruleCode, String field)
+        {
             this.code = code;
             this.message = message;
+            this.ruleCode = ruleCode;
+            this.field = field;
         }
 
         public Code getCode()
@@ -56,6 +65,17 @@ public interface ImportAction
         public String getMessage()
         {
             return message;
+        }
+
+        /** Stable rule identifier, or null for statuses without rule metadata. */
+        public String getRuleCode()
+        {
+            return ruleCode;
+        }
+
+        public String getField()
+        {
+            return field;
         }
     }
 

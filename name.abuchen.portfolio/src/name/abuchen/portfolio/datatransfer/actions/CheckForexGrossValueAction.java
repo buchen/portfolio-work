@@ -80,7 +80,8 @@ public class CheckForexGrossValueAction implements ImportAction
         {
             return new Status(Status.Code.ERROR,
                             MessageFormat.format(Messages.MsgCheckConfiguredAndCalculatedGrossValueDoNotMatch,
-                                            Values.Money.format(unitValue), Values.Money.format(calculatedValue)));
+                                            Values.Money.format(unitValue), Values.Money.format(calculatedValue)),
+                            "gross-value-mismatch", "units"); //$NON-NLS-1$ //$NON-NLS-2$
         }
 
         return Status.OK_STATUS;

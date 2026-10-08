@@ -24,15 +24,18 @@ public class CheckSecurityRelatedValuesAction implements ImportAction
         if (hasSecurity && !typesWithOptionalSecurity.contains(transaction.getType()))
             return new Status(Status.Code.ERROR,
                             MessageFormat.format(Messages.MsgCheckTransactionTypeCannotHaveASecurity,
-                                            transaction.getType(), transaction.getSecurity().getName()));
+                                            transaction.getType(), transaction.getSecurity().getName()),
+                            "instrument-not-allowed", "instrument"); //$NON-NLS-1$ //$NON-NLS-2$
 
         if (!hasSecurity && transaction.getType() == Type.DIVIDENDS)
-            return new Status(Status.Code.ERROR, Messages.MsgCheckDividendsMustHaveASecurity);
+            return new Status(Status.Code.ERROR, Messages.MsgCheckDividendsMustHaveASecurity,
+                            "instrument-required", "instrument"); //$NON-NLS-1$ //$NON-NLS-2$
 
         if (transaction.getShares() != 0
                         && (!hasSecurity || !typesWithOptionalSecurity.contains(transaction.getType())))
             return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckTransactionTypeCannotHaveShares,
-                            transaction.getType(), Values.Share.format(transaction.getShares())));
+                            transaction.getType(), Values.Share.format(transaction.getShares())),
+                            "shares-not-allowed", "shares"); //$NON-NLS-1$ //$NON-NLS-2$
 
         return Status.OK_STATUS;
     }
