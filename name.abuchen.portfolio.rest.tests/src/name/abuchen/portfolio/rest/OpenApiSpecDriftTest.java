@@ -81,7 +81,8 @@ public class OpenApiSpecDriftTest
 
     /** Request bodies reject unknown enum values; accepting new values is additive. */
     private static final Set<String> REQUEST_ENUMS = Set.of("CreateCashTransaction.type",
-                    "CreateBuySellTransaction.type", "CreateDeliveryTransaction.type", "TransactionUnitInput.type");
+                    "CreateBuySellTransaction.type", "CreateDeliveryTransaction.type", "CreateCashTransfer.type",
+                    "CreateSecurityTransfer.type", "TransactionUnitInput.type");
 
     private IEclipsePreferences node;
 

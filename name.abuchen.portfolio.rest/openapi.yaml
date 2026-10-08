@@ -758,6 +758,8 @@ paths:
                 - $ref: "#/components/schemas/CreateCashTransaction"
                 - $ref: "#/components/schemas/CreateBuySellTransaction"
                 - $ref: "#/components/schemas/CreateDeliveryTransaction"
+                - $ref: "#/components/schemas/CreateCashTransfer"
+                - $ref: "#/components/schemas/CreateSecurityTransfer"
       responses:
         "201":
           description: Created transaction
@@ -1911,6 +1913,81 @@ components:
         units:
           type: array
           description: Fees, taxes and forex detail; derived gross must be positive. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateCashTransfer:
+      type: object
+      additionalProperties: false
+      description: |
+        Linked transfer between distinct cash accounts. Both amounts must be positive
+        and use their respective account currencies. Same-currency amounts must match
+        and units must be empty. Different currencies require one gross-value unit:
+        its amount equals amount, its forex equals targetAmount, and its exchangeRate
+        converts incoming currency to outgoing currency. Fees and taxes are not allowed.
+      required: [type, dateTime, fromCashAccount, toCashAccount, amount, targetAmount]
+      properties:
+        type:
+          type: string
+          enum: [cash-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromCashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        toCashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Positive outgoing amount.
+        targetAmount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Positive incoming amount; required even for same-currency transfers.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          maxItems: 1
+          description: Forex gross-value detail only; defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateSecurityTransfer:
+      type: object
+      additionalProperties: false
+      description: Linked transfer between distinct investment accounts. Amount must be positive and use the instrument currency.
+      required: [type, dateTime, fromInvestmentAccount, toInvestmentAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [security-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        toInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          maxItems: 0
+          description: Must be empty; security transfers have no fees, taxes or forex units.
           items:
             $ref: "#/components/schemas/TransactionUnitInput"
 

@@ -18,10 +18,12 @@ import name.abuchen.portfolio.datatransfer.ImportAction.Status;
 import name.abuchen.portfolio.datatransfer.TransactionRules;
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.AccountTransaction;
+import name.abuchen.portfolio.model.AccountTransferEntry;
 import name.abuchen.portfolio.model.BuySellEntry;
 import name.abuchen.portfolio.model.Client;
 import name.abuchen.portfolio.model.Portfolio;
 import name.abuchen.portfolio.model.PortfolioTransaction;
+import name.abuchen.portfolio.model.PortfolioTransferEntry;
 import name.abuchen.portfolio.model.Security;
 import name.abuchen.portfolio.model.Transaction;
 import name.abuchen.portfolio.money.Money;
@@ -46,6 +48,8 @@ final class TransactionInput
         var event = switch (type == null ? "" : type)
         {
             case "buy", "sell", "delivery-inbound", "delivery-outbound" -> investment(client, body, clientName, type);
+            case "cash-transfer" -> cashTransfer(client, body, clientName);
+            case "security-transfer" -> securityTransfer(client, body, clientName);
             default -> cash(client, body, clientName, type);
         };
         if (!errors.isEmpty())
@@ -104,6 +108,45 @@ final class TransactionInput
         else
             statuses(TransactionRules.entryProfile().validate(transaction, portfolio));
         return new TransactionsHandler.Event(portfolio, transaction);
+    }
+
+    private TransactionsHandler.Event cashTransfer(Client client, JsonObject body, String clientName)
+    {
+        unknown(body, Set.of("type", "dateTime", "fromCashAccount", "toCashAccount", "amount", "targetAmount",
+                        "note", "source", "units"), "");
+        var source = reference(body.get("fromCashAccount"), "fromCashAccount", client.getAccounts(), Account::getUUID, true);
+        var target = reference(body.get("toCashAccount"), "toCashAccount", client.getAccounts(), Account::getUUID, true);
+        var entry = new AccountTransferEntry(source, target);
+        var transaction = entry.getSourceTransaction();
+        common(body, transaction, clientName, false);
+        entry.setDate(transaction.getDateTime());
+        entry.setNote(transaction.getNote());
+        entry.setSource(transaction.getSource());
+        var amount = money(body.get("targetAmount"), "targetAmount", true);
+        if (amount != null)
+            entry.getTargetTransaction().setMonetaryAmount(amount);
+        statuses(TransactionRules.entryProfile().validate(entry, source, target));
+        return new TransactionsHandler.Event(source, transaction);
+    }
+
+    private TransactionsHandler.Event securityTransfer(Client client, JsonObject body, String clientName)
+    {
+        unknown(body, Set.of("type", "dateTime", "fromInvestmentAccount", "toInvestmentAccount", "instrument",
+                        "shares", "amount", "note", "source", "units"), "");
+        var source = reference(body.get("fromInvestmentAccount"), "fromInvestmentAccount", client.getPortfolios(), Portfolio::getUUID, true);
+        var target = reference(body.get("toInvestmentAccount"), "toInvestmentAccount", client.getPortfolios(), Portfolio::getUUID, true);
+        var entry = new PortfolioTransferEntry(source, target);
+        var transaction = entry.getSourceTransaction();
+        common(body, transaction, clientName, true);
+        entry.setSecurity(reference(body.get("instrument"), "instrument", client.getSecurities(), Security::getUUID, true));
+        entry.setDate(transaction.getDateTime());
+        entry.setNote(transaction.getNote());
+        entry.setSource(transaction.getSource());
+        entry.setShares(transaction.getShares());
+        entry.setAmount(transaction.getAmount());
+        entry.setCurrencyCode(transaction.getCurrencyCode());
+        statuses(TransactionRules.entryProfile().validate(entry, source, target));
+        return new TransactionsHandler.Event(source, transaction);
     }
 
     private void common(JsonObject body, Transaction transaction, String clientName, boolean sharesRequired)

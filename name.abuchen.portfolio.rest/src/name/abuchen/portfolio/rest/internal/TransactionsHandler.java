@@ -141,6 +141,10 @@ public final class TransactionsHandler
         var insert = new InsertAction(client);
         if (event.transaction().getCrossEntry() instanceof BuySellEntry entry)
             insert.process(entry, entry.getAccount(), entry.getPortfolio());
+        else if (event.transaction().getCrossEntry() instanceof AccountTransferEntry entry)
+            insert.process(entry, entry.getSourceAccount(), entry.getTargetAccount());
+        else if (event.transaction().getCrossEntry() instanceof PortfolioTransferEntry entry)
+            insert.process(entry, entry.getSourcePortfolio(), entry.getTargetPortfolio());
         else if (event.transaction() instanceof PortfolioTransaction transaction)
             insert.process(transaction, (Portfolio) event.owner());
         else

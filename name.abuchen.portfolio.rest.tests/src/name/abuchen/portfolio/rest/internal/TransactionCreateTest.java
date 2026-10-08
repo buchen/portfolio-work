@@ -6,6 +6,7 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,8 @@ import name.abuchen.portfolio.model.BuySellEntry;
 import name.abuchen.portfolio.model.Client;
 import name.abuchen.portfolio.model.Portfolio;
 import name.abuchen.portfolio.model.Security;
+import name.abuchen.portfolio.model.Transaction.Unit;
+import name.abuchen.portfolio.money.Money;
 import name.abuchen.portfolio.rest.ApiRoutes;
 import name.abuchen.portfolio.rest.FileAccessRegistry;
 import name.abuchen.portfolio.rest.testsupport.FakeHost;
@@ -37,6 +40,8 @@ public class TransactionCreateTest
     private final Account account = new Account();
     private final Security security = new Security();
     private final Portfolio portfolio = new Portfolio();
+    private final Account targetAccount = new Account();
+    private final Portfolio targetPortfolio = new Portfolio();
     private final AtomicInteger dirty = new AtomicInteger();
 
     public TransactionCreateTest()
@@ -50,6 +55,11 @@ public class TransactionCreateTest
         portfolio.setName("Investments");
         portfolio.setReferenceAccount(account);
         client.addPortfolio(portfolio);
+        targetAccount.setCurrencyCode("EUR");
+        targetAccount.setName("Target cash");
+        client.addAccount(targetAccount);
+        targetPortfolio.setName("Target investments");
+        client.addPortfolio(targetPortfolio);
         client.addPropertyChangeListener("dirty", event -> dirty.incrementAndGet());
     }
 
@@ -80,13 +90,13 @@ public class TransactionCreateTest
 
     private ApiException rejected(JsonObject body)
     {
-        int count = account.getTransactions().size();
-        int investments = portfolio.getTransactions().size();
+        int count = client.getAccounts().stream().mapToInt(value -> value.getTransactions().size()).sum();
+        int investments = client.getPortfolios().stream().mapToInt(value -> value.getTransactions().size()).sum();
         int changes = dirty.get();
         var error = assertThrows(ApiException.class, () -> create(body));
         assertEquals(422, error.getStatus());
-        assertEquals(count, account.getTransactions().size());
-        assertEquals(investments, portfolio.getTransactions().size());
+        assertEquals(count, client.getAccounts().stream().mapToInt(value -> value.getTransactions().size()).sum());
+        assertEquals(investments, client.getPortfolios().stream().mapToInt(value -> value.getTransactions().size()).sum());
         assertEquals(changes, dirty.get());
         return error;
     }
@@ -116,6 +126,161 @@ public class TransactionCreateTest
                         .filter(provider -> provider.type().getName().equals("name.abuchen.portfolio.checks.impl.CrossEntryCheck"))
                         .findFirst().orElseThrow().get();
         assertTrue(check.execute(client).isEmpty());
+    }
+
+    private JsonObject transferBody(String type)
+    {
+        boolean cash = type.equals("cash-transfer");
+        var body = cash ? body(type) : investmentBody(type);
+        body.remove("cashAccount");
+        body.remove("investmentAccount");
+        var from = new JsonObject();
+        from.addProperty("uuid", cash ? account.getUUID() : portfolio.getUUID());
+        body.add(cash ? "fromCashAccount" : "fromInvestmentAccount", from);
+        var to = new JsonObject();
+        to.addProperty("uuid", cash ? targetAccount.getUUID() : targetPortfolio.getUUID());
+        body.add(cash ? "toCashAccount" : "toInvestmentAccount", to);
+        if (cash)
+            body.add("targetAmount", body.get("amount").deepCopy());
+        return body;
+    }
+
+    @Test
+    public void createsTransfersWithCanonicalOutgoingIdentityAndMatchingHalves()
+    {
+        for (var type : List.of("cash-transfer", "security-transfer"))
+        {
+            var body = transferBody(type);
+            body.addProperty("note", "Transfer");
+            var json = create(body);
+            var from = type.equals("cash-transfer") ? account.getTransactions().getLast()
+                            : portfolio.getTransactions().getLast();
+            var to = type.equals("cash-transfer") ? targetAccount.getTransactions().getLast()
+                            : targetPortfolio.getTransactions().getLast();
+            assertEquals(type, json.get("type").getAsString());
+            assertEquals(from.getUUID(), json.get("uuid").getAsString());
+            assertEquals(json, TransactionsHandler.get(client, to.getUUID()));
+            assertSame(from.getCrossEntry(), to.getCrossEntry());
+            assertSame(to, from.getCrossEntry().getCrossTransaction(from));
+            assertEquals(from.getMonetaryAmount(), to.getMonetaryAmount());
+            assertEquals(from.getShares(), to.getShares());
+            assertSame(from.getSecurity(), to.getSecurity());
+            assertEquals(from.getDateTime(), to.getDateTime());
+            assertEquals("Transfer", to.getNote());
+            assertEquals("Paired client", from.getSource());
+            assertEquals("Paired client", to.getSource());
+            assertCrossEntriesConsistent();
+        }
+        assertEquals(2, dirty.get());
+    }
+
+    @Test
+    public void cashTransferForexUsesIncomingAmountAndInverseDialogRate()
+    {
+        targetAccount.setCurrencyCode("USD");
+        var body = transferBody("cash-transfer");
+        body.getAsJsonObject("amount").addProperty("value", 80);
+        body.add("targetAmount", JsonParser.parseString("{\"value\":100,\"currency\":\"USD\"}"));
+        body.add("units", JsonParser.parseString("""
+                        [{"type":"gross-value","amount":{"value":80,"currency":"EUR"},
+                          "forex":{"value":100,"currency":"USD"},"exchangeRate":0.8}]
+                        """));
+        body.addProperty("source", "Explicit transfer");
+        var json = create(body);
+        assertEquals(80, json.getAsJsonObject("amount").get("value").getAsInt());
+        assertEquals(100, json.getAsJsonObject("targetAmount").get("value").getAsInt());
+        var unit = account.getTransactions().getFirst().getUnit(Unit.Type.GROSS_VALUE).orElseThrow();
+        assertEquals(Money.of("EUR", 8000), unit.getAmount());
+        assertEquals(Money.of("USD", 10000), unit.getForex());
+        assertEquals(new BigDecimal("0.8"), unit.getExchangeRate());
+        assertTrue(targetAccount.getTransactions().getFirst().getUnits().findAny().isEmpty());
+        assertEquals("Explicit transfer", targetAccount.getTransactions().getFirst().getSource());
+        assertCrossEntriesConsistent();
+        body.getAsJsonObject("targetAmount").addProperty("value", 101);
+        has(rejected(body), "units", "forex-mismatch");
+        body.getAsJsonObject("targetAmount").addProperty("value", 100);
+        body.getAsJsonArray("units").get(0).getAsJsonObject().addProperty("exchangeRate", 1);
+        has(rejected(body), "units[0]", "forex-amount-mismatch");
+        body.remove("units");
+        has(rejected(body), "units", "gross-value-required");
+    }
+
+    @Test
+    public void rejectsCashTransferAmountsOwnersAndChargesWithoutPartialInsertion()
+    {
+        var body = transferBody("cash-transfer");
+        body.getAsJsonObject("toCashAccount").addProperty("uuid", account.getUUID());
+        body.getAsJsonObject("targetAmount").addProperty("value", 0);
+        body.getAsJsonObject("amount").addProperty("currency", "USD");
+        body.add("units", JsonParser.parseString("""
+                        [{"type":"fee","amount":{"value":1,"currency":"USD"}}]
+                        """));
+        var error = rejected(body);
+        has(error, "toCashAccount", "same-owner");
+        has(error, "targetAmount", "amount-required");
+        has(error, "amount.currency", "currency-mismatch");
+        has(error, "units", "units-not-allowed");
+        body = transferBody("cash-transfer");
+        body.getAsJsonObject("targetAmount").addProperty("value", 12.35);
+        has(rejected(body), "targetAmount", "amount-mismatch");
+        body.getAsJsonObject("targetAmount").addProperty("currency", "USD");
+        has(rejected(body), "targetAmount.currency", "currency-mismatch");
+        body.remove("targetAmount");
+        has(rejected(body), "targetAmount", "required");
+        body.add("targetAmount", JsonParser.parseString("{\"value\":1.001,\"currency\":\"EUR\"}"));
+        has(rejected(body), "targetAmount.value", "too-many-decimals");
+        body.addProperty("targetAmount", false);
+        body.getAsJsonObject("toCashAccount").addProperty("uuid", "missing");
+        error = rejected(body);
+        has(error, "targetAmount", "invalid-type");
+        has(error, "toCashAccount", "unknown-entity");
+        body = transferBody("cash-transfer");
+        body.add("units", JsonParser.parseString("""
+                        [{"type":"gross-value","amount":{"value":12.34,"currency":"EUR"},
+                          "forex":{"value":12.34,"currency":"USD"},"exchangeRate":1}]
+                        """));
+        has(rejected(body), "units", "forex-not-allowed");
+    }
+
+    @Test
+    public void securityTransferUsesInstrumentCurrencyRegardlessOfReferenceAccounts()
+    {
+        security.setCurrencyCode("USD");
+        var body = transferBody("security-transfer");
+        body.getAsJsonObject("amount").addProperty("currency", "USD");
+        create(body);
+        assertEquals("USD", targetPortfolio.getTransactions().getFirst().getCurrencyCode());
+        assertEquals(0, account.getTransactions().size());
+        assertCrossEntriesConsistent();
+        body.getAsJsonObject("amount").addProperty("currency", "EUR");
+        has(rejected(body), "amount.currency", "currency-mismatch");
+    }
+
+    @Test
+    public void rejectsSecurityTransferRulesAndMalformedReferencesTogether()
+    {
+        var body = transferBody("security-transfer");
+        body.getAsJsonObject("toInvestmentAccount").addProperty("uuid", portfolio.getUUID());
+        body.addProperty("shares", 0);
+        body.getAsJsonObject("amount").addProperty("value", 0);
+        body.remove("instrument");
+        body.add("units", JsonParser.parseString("""
+                        [{"type":"tax","amount":{"value":1,"currency":"EUR"}}]
+                        """));
+        var error = rejected(body);
+        has(error, "toInvestmentAccount", "same-owner");
+        has(error, "shares", "shares-required");
+        has(error, "amount", "amount-required");
+        has(error, "instrument", "instrument-required");
+        has(error, "units", "units-not-allowed");
+        body = transferBody("security-transfer");
+        body.addProperty("fromInvestmentAccount", false);
+        body.getAsJsonObject("toInvestmentAccount").addProperty("uuid", "missing");
+        body.add("shares", JsonParser.parseString("1.000000001"));
+        error = rejected(body);
+        has(error, "fromInvestmentAccount", "invalid-type");
+        has(error, "toInvestmentAccount", "unknown-entity");
+        has(error, "shares", "too-many-decimals");
     }
 
     @Test
@@ -384,9 +549,10 @@ public class TransactionCreateTest
             var router = ApiRoutes.create(registry, host, null);
             var uri = "/v1/files/sample/transactions";
             var route = router.match("POST", uri);
-            for (var type : List.of("deposit", "buy", "sell", "delivery-inbound", "delivery-outbound"))
+            for (var type : List.of("deposit", "buy", "sell", "delivery-inbound", "delivery-outbound", "cash-transfer", "security-transfer"))
             {
-                var body = type.equals("deposit") ? body(type) : investmentBody(type);
+                var body = type.endsWith("transfer") ? transferBody(type)
+                                : type.equals("deposit") ? body(type) : investmentBody(type);
                 var request = new Request("POST", uri, route.pathParams(), Map.of(),
                                 body.toString().getBytes(StandardCharsets.UTF_8),
                                 Request.Authorization.VALID, null, "Paired client");
@@ -402,7 +568,7 @@ public class TransactionCreateTest
                 host.setUserEditing(false);
                 var response = route.handler().handle(request);
                 assertEquals(201, response.status());
-                var transaction = type.equals("deposit") ? account.getTransactions().getLast()
+                var transaction = type.equals("deposit") || type.equals("cash-transfer") ? account.getTransactions().getLast()
                                 : portfolio.getTransactions().getLast();
                 assertEquals(uri + "/" + transaction.getUUID(), response.headers().get("Location"));
                 assertEquals(changes + 1, dirty.get());

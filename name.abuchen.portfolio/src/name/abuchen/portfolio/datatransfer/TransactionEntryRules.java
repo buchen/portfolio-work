@@ -130,19 +130,22 @@ public final class TransactionEntryRules
         var from = entry.getSourceTransaction();
         var to = entry.getTargetTransaction();
         common(from, errors);
-        common(to, errors);
+        var targetErrors = new Errors();
+        common(to, targetErrors);
+        if (usableCurrency(to))
+            targetErrors.addAll(new CheckCurrenciesAction().validate(to, target));
+        targetErrors.result().forEach(status -> errors.add(status.getRuleCode(),
+                        status.getField().replaceFirst("^amount", "targetAmount")));
         errors.require(from.getType() == AccountTransaction.Type.TRANSFER_OUT
                         && to.getType() == AccountTransaction.Type.TRANSFER_IN, "invalid-type", "type");
         errors.require(from.getAmount() > 0, "amount-required", "amount");
-        errors.require(to.getAmount() > 0, "amount-required", "forex");
+        errors.require(to.getAmount() > 0, "amount-required", "targetAmount");
         errors.require(from.getSecurity() == null && to.getSecurity() == null,
                         "instrument-not-allowed", "instrument");
         errors.require(from.getShares() == 0 && to.getShares() == 0, "shares-not-allowed", "shares");
         errors.require(from.getExDate() == null && to.getExDate() == null, "ex-date-not-allowed", "exDate");
         if (usableCurrency(from))
             errors.addAll(new CheckCurrenciesAction().validate(from, source));
-        if (usableCurrency(to))
-            errors.addAll(new CheckCurrenciesAction().validate(to, target));
         errors.require(to.getUnits().findAny().isEmpty(), "units-not-allowed", "units");
         errors.require(from.getUnits().allMatch(unit -> unit.getType() == Unit.Type.GROSS_VALUE),
                         "units-not-allowed", "units");
@@ -152,7 +155,7 @@ public final class TransactionEntryRules
             // rate, and the outgoing unit's forex is the incoming amount.
             if (from.getCurrencyCode().equals(to.getCurrencyCode()))
             {
-                errors.require(from.getAmount() == to.getAmount(), "amount-mismatch", "forex");
+                errors.require(from.getAmount() == to.getAmount(), "amount-mismatch", "targetAmount");
                 errors.require(from.getUnits().findAny().isEmpty(), "forex-not-allowed", "units");
             }
             else
@@ -165,7 +168,7 @@ public final class TransactionEntryRules
                     if (unit.getExchangeRate() != null && unit.getExchangeRate().signum() > 0)
                         errors.require(CheckForexGrossValueAction.isWithinEntryTolerance(to.getAmount(), from.getAmount(),
                                         BigDecimal.ONE.divide(unit.getExchangeRate(), Values.MC)),
-                                        "forex-amount-mismatch", "forex");
+                                        "forex-amount-mismatch", "targetAmount");
                 });
             }
         }

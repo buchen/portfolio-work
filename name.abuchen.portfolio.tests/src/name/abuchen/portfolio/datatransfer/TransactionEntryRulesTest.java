@@ -376,6 +376,13 @@ public class TransactionEntryRulesTest
         entry.setAmount(10000);
         assertError(rules.validate(entry, source, source), "same-owner", "toCashAccount");
         assertThat(rules.validate(entry, source, account("EUR")).isEmpty(), is(true));
+        entry.getTargetTransaction().setAmount(0);
+        var errors = rules.validate(entry, source, target);
+        assertError(errors, "amount-required", "targetAmount");
+        assertError(errors, "amount-mismatch", "targetAmount");
+        assertError(errors, "currency-mismatch", "targetAmount.currency");
+        entry.getTargetTransaction().setCurrencyCode("XYZ");
+        assertError(rules.validate(entry, source, target), "unsupported-currency", "targetAmount.currency");
     }
 
     @Test
