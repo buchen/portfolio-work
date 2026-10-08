@@ -1,5 +1,7 @@
 package name.abuchen.portfolio.datatransfer.actions;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.MessageFormat;
 import java.util.Optional;
 
@@ -19,6 +21,38 @@ import name.abuchen.portfolio.money.Values;
 
 public class CheckForexGrossValueAction implements ImportAction
 {
+    public enum Profile
+    {
+        IMPORT, ENTRY
+    }
+
+    private final Profile profile;
+
+    public CheckForexGrossValueAction()
+    {
+        this(Profile.IMPORT);
+    }
+
+    public CheckForexGrossValueAction(Profile profile)
+    {
+        this.profile = profile;
+    }
+
+    /** Dialog calculation statuses use an absolute rate tolerance of 0.0001. */
+    public static boolean isWithinEntryTolerance(long amount, long forex, BigDecimal rate)
+    {
+        return isConversionWithinRange(BigDecimal.valueOf(forex), rate)
+                        && Unit.isWithinRoundingTolerance(amount, forex, rate, BigDecimal.valueOf(0.0001), false);
+    }
+
+    /** Math.round saturates at long boundaries; entry must reject that loss. */
+    public static boolean isConversionWithinRange(BigDecimal forex, BigDecimal rate)
+    {
+        var rounded = forex.multiply(rate).setScale(0, RoundingMode.HALF_UP);
+        return rounded.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) >= 0
+                        && rounded.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) <= 0;
+    }
+
     @Override
     public Status process(AccountTransaction transaction, Account account)
     {
@@ -75,8 +109,8 @@ public class CheckForexGrossValueAction implements ImportAction
         // to the currency conversion
 
         if (!unitValue.equals(calculatedValue) //
-                        && !Unit.isWithinRoundingTolerance(calculatedValue, grossValueUnit.get().getForex(),
-                                        grossValueUnit.get().getExchangeRate()))
+                        && (profile == Profile.ENTRY || !Unit.isWithinRoundingTolerance(calculatedValue,
+                                        grossValueUnit.get().getForex(), grossValueUnit.get().getExchangeRate())))
         {
             return new Status(Status.Code.ERROR,
                             MessageFormat.format(Messages.MsgCheckConfiguredAndCalculatedGrossValueDoNotMatch,

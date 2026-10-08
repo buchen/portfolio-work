@@ -17,6 +17,12 @@ public final class TransactionRules
     {
     }
 
+    /** Dialog semantics for unattached transactions, separate from import acceptance. */
+    public static TransactionEntryRules entryProfile()
+    {
+        return new TransactionEntryRules();
+    }
+
     /** Validity checks using the importer's acceptance and rounding rules. */
     public static List<ImportAction> importProfile()
     {

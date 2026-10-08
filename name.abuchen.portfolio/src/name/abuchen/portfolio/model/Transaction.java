@@ -98,11 +98,22 @@ public abstract class Transaction implements Annotated, Adaptable
          */
         public static boolean isWithinRoundingTolerance(Money amount, Money forex, BigDecimal exchangeRate)
         {
+            return isWithinRoundingTolerance(amount.getAmount(), forex.getAmount(), exchangeRate,
+                            BigDecimal.valueOf(0.003), true);
+        }
+
+        /**
+         * Shared conversion check. Imports allow reverse rounding for small
+         * amounts; entry dialogs use a narrower rate tolerance without it.
+         */
+        public static boolean isWithinRoundingTolerance(long amount, long forex, BigDecimal exchangeRate,
+                        BigDecimal rateTolerance, boolean allowReverseRounding)
+        {
             // check whether given amount is in range of converted amount
-            long upper = Math.round(exchangeRate.add(BigDecimal.valueOf(0.003))
-                            .multiply(BigDecimal.valueOf(forex.getAmount())).doubleValue());
-            long lower = Math.round(exchangeRate.add(BigDecimal.valueOf(-0.003))
-                            .multiply(BigDecimal.valueOf(forex.getAmount())).doubleValue());
+            long upper = Math.round(exchangeRate.add(rateTolerance)
+                            .multiply(BigDecimal.valueOf(forex)).doubleValue());
+            long lower = Math.round(exchangeRate.subtract(rateTolerance)
+                            .multiply(BigDecimal.valueOf(forex)).doubleValue());
 
             // check for negative values
             if (lower > upper)
@@ -112,14 +123,17 @@ public abstract class Transaction implements Annotated, Adaptable
                 upper = temp;
             }
 
-            if (amount.getAmount() < lower || amount.getAmount() > upper)
+            if (amount < lower || amount > upper)
             {
+                if (!allowReverseRounding)
+                    return false;
+
                 // do the reverse check b/c small currency amounts might not
                 // allow for a better exchange rate
 
-                upper = BigDecimal.valueOf(amount.getAmount() + 1).divide(exchangeRate, Values.MC)
+                upper = BigDecimal.valueOf(amount + 1).divide(exchangeRate, Values.MC)
                                 .setScale(0, RoundingMode.HALF_EVEN).longValue();
-                lower = BigDecimal.valueOf(amount.getAmount() - 1).divide(exchangeRate, Values.MC)
+                lower = BigDecimal.valueOf(amount - 1).divide(exchangeRate, Values.MC)
                                 .setScale(0, RoundingMode.HALF_EVEN).longValue();
 
                 if (lower > upper)
@@ -129,7 +143,7 @@ public abstract class Transaction implements Annotated, Adaptable
                     upper = temp;
                 }
 
-                if (forex.getAmount() < lower || forex.getAmount() > upper)
+                if (forex < lower || forex > upper)
                 {
                     return false;
                 }
