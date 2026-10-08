@@ -11,6 +11,7 @@ public class Messages extends NLS
     public static String MsgApiValueUnset;
     public static String MsgApiValueRemoved;
     public static String MsgApiTransactionCreated;
+    public static String MsgApiTransactionDeleted;
     public static String MsgErrorAliasAlreadyInUse;
     public static String MsgErrorAliasMustMatchPattern;
     public static String MsgErrorAliasMustNotLookLikeUUID;

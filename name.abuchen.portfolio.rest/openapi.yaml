@@ -126,10 +126,8 @@ info:
 
     ## Methods
 
-    A path serves only the methods listed for it in this document; the only
-    `POST` endpoint is the pairing request — v1 has **no create endpoints for
-    portfolio data**. Calling any method that a path does not list returns
-    `405 method-not-allowed`.
+    A path serves only the methods listed for it in this document. Calling any
+    method that a path does not list returns `405 method-not-allowed`.
 
     ## Query parameters
 
@@ -881,6 +879,34 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteTransaction
+      tags: [Transactions]
+      summary: Delete a transaction event
+      description: |
+        Deletes the whole event. Either linked record UUID removes both records.
+        An event marked integrity: missing-counterpart deletes only the surviving record.
+        Rejected with `409 delete-blocked` if either record belongs to an investment
+        plan: deletion would remove a plan association not exposed in the event.
+        Handle these transactions in the UI. Available through REST only.
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "423":
+          $ref: "#/components/responses/Locked"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -3110,9 +3136,10 @@ components:
             *does* exist, and that the three
             **409** kinds each call for a different response:
             `file-not-open` (a human must open the file), `ambiguous-alias` (retry
-            with the `id`), `delete-blocked` (give up — the instrument is referenced).
+            with the `id`), `delete-blocked` (the instrument is referenced or the
+            transaction belongs to an investment plan; handle it in the UI).
             `method-not-allowed` (405) is returned for any method a path does not
-            list; v1 has no create endpoints.
+            list.
 
             **Open set:** new problem types may be added within v1. Treat an
             unknown `type` by its HTTP `status`.
@@ -3220,7 +3247,7 @@ components:
         `file-not-open` (enabled but not open — a human must open it),
         `ambiguous-alias` (the alias matches several records — use the `id`), or, on
         delete, `delete-blocked` (the instrument is referenced by transactions or
-        plans).
+        plans, or the transaction belongs to an investment plan).
       content:
         application/problem+json:
           schema:

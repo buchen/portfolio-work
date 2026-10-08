@@ -212,6 +212,14 @@ the gross derived from the net amount and charges, without adjusting any numbers
 Validation reports all applicable errors together with 422 and leaves the file unchanged.
 Transaction creation is currently available through REST only.
 
+### `DELETE /v1/files/{file}/transactions/{uuid}`
+
+Deletes the whole event with `204 No Content`; either linked record UUID removes both
+records. For an event marked `integrity: "missing-counterpart"`, deletes only the surviving record.
+Returns `409 delete-blocked` if either record belongs to an investment plan,
+because deleting it would also remove a plan association that the event does not expose.
+Handle these transactions in the UI. Transaction deletion is available through REST only.
+
 ## Compatibility
 
 Everything under `/v1` is additive: nothing changes meaning, changes type or disappears, and a
@@ -247,7 +255,7 @@ save.
 | 404 | `not-found` | unknown file, **file not enabled**, or unknown entity |
 | 409 | `file-not-open` | file is enabled but not currently open — a human has to open it |
 | 409 | `ambiguous-alias` | alias matches several records; use the UUID |
-| 409 | `delete-blocked` | instrument is referenced by transactions or plans |
+| 409 | `delete-blocked` | instrument is referenced by transactions or plans, or a transaction belongs to a plan |
 | 422 | `validation` | one or more fields rejected; see `errors` |
 | 423 | `user-interaction` | a dialog is open in the app — **retry**, see `Retry-After` |
 | 429 | `pairing-pending` | another pairing request awaits the user — retry after `Retry-After` |

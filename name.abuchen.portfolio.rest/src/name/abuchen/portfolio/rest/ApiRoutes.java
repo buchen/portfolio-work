@@ -129,6 +129,13 @@ public final class ApiRoutes
                                             Map.of("Location", req.path() + "/" + uuid)); //$NON-NLS-1$ //$NON-NLS-2$
                         }));
 
+        router.add("DELETE", "/v1/files/{file}/transactions/{uuid}", write(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (file, req) -> {
+                            var uuid = TransactionsHandler.delete(file.getClient(), req.pathParam("uuid")); //$NON-NLS-1$
+                            TransactionChangeLog.recordDeletion(file.getLabel(), uuid);
+                            return Response.noContent();
+                        }));
+
         router.add("GET", "/v1/files/{file}/holdings", calc(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
                         (context, req) -> Response.json(200, HoldingsHandler.list(context.client(), context.factory(),
                                         req.queryParam("date"), req.queryParam("reportingCurrency")))), //$NON-NLS-1$ //$NON-NLS-2$

@@ -153,6 +153,29 @@ public final class TransactionsHandler
         return EntityJson.toJson(event).getAsJsonObject();
     }
 
+    public static String delete(Client client, String uuid)
+    {
+        var event = find(client, uuid);
+        var transaction = event.transaction();
+        var counterpart = transaction.getCrossEntry() == null ? null
+                        : transaction.getCrossEntry().getCrossTransaction(transaction);
+
+        // Deletion also removes plan membership, which the event representation
+        // does not expose. Require that association to be handled in the UI.
+        if (client.getPlans().stream().anyMatch(plan -> plan.getTransactions().contains(transaction)
+                        || counterpart != null && plan.getTransactions().contains(counterpart)))
+            throw ApiException.conflict("delete-blocked", "Transaction belongs to an investment plan", null, //$NON-NLS-1$ //$NON-NLS-2$
+                            List.of(new ApiException.FieldError("plans", "referenced", //$NON-NLS-1$ //$NON-NLS-2$
+                                            "transaction is used by an investment plan"))); //$NON-NLS-1$
+
+        if (transaction instanceof PortfolioTransaction investment)
+            ((Portfolio) event.owner()).deleteTransaction(investment, client);
+        else
+            ((Account) event.owner()).deleteTransaction((AccountTransaction) transaction, client);
+        client.markDirty();
+        return transaction.getUUID();
+    }
+
     public static JsonElement list(Client client, String type, String from, String to, String instrument,
                     String cashAccount, String investmentAccount)
     {
