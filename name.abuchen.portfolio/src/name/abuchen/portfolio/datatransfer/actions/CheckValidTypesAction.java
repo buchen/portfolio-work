@@ -21,7 +21,7 @@ public class CheckValidTypesAction implements ImportAction
             case TRANSFER_IN:
             case TRANSFER_OUT:
                 return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckInvalidTransactionType,
-                                transaction.getType().toString()));
+                                transaction.getType().toString()), "invalid-type", "type"); //$NON-NLS-1$ //$NON-NLS-2$
             case DEPOSIT:
             case DIVIDENDS:
             case INTEREST:
@@ -47,7 +47,7 @@ public class CheckValidTypesAction implements ImportAction
             case TRANSFER_IN:
             case TRANSFER_OUT:
                 return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckInvalidTransactionType,
-                                transaction.getType().toString()));
+                                transaction.getType().toString()), "invalid-type", "type"); //$NON-NLS-1$ //$NON-NLS-2$
             case DELIVERY_INBOUND:
             case DELIVERY_OUTBOUND:
                 return Status.OK_STATUS;

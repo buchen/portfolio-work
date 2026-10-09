@@ -49,6 +49,9 @@ public class OpenApiSpecDriftTest
      */
     private static final Pattern FIELD_ERROR_CODE = Pattern.compile("FieldError\\(\\s*[^,]+,\\s*\"([a-z-]+)\"");
 
+    // TransactionInput.error forwards these literal codes to FieldError.
+    private static final Pattern TRANSACTION_ERROR_CODE = Pattern.compile("error\\(\\s*[^,]+,\\s*\"([a-z-]+)\"");
+
     private static final Pattern STATUS_CODE = Pattern.compile("[1-5][0-9][0-9]");
 
     /**
@@ -66,7 +69,7 @@ public class OpenApiSpecDriftTest
      * what a client does with a value it does not know.
      */
     private static final Set<String> OPEN_ENUMS = Set.of("Problem.type", "FieldError.code", "TradeWarning.code",
-                    "AttributeDefinition.type", "Holding.type");
+                    "AttributeDefinition.type", "Holding.type", "TransactionFields.integrity", "TransactionFields.type", "TransactionUnit.type");
 
     /**
      * Response enums whose values are fixed for v1: binary by nature, a state
@@ -78,6 +81,13 @@ public class OpenApiSpecDriftTest
                     "TradesResponse.grouping", "TradesResponse.status", "Performance.costMethod",
                     "InstrumentPerformanceContext.costMethod", "InstrumentPerformanceContext.taxesAndFees",
                     "InstrumentPerformanceContext.metrics");
+
+    /** Request bodies reject unknown enum values; accepting new values is additive. */
+    private static final Set<String> REQUEST_ENUMS = Set.of("CreateCashTransaction.type",
+                    "CreateBuySellTransaction.type", "CreateDeliveryTransaction.type", "CreateCashTransfer.type",
+                    "CreateSecurityTransfer.type", "TransactionUnitInput.type", "PatchCashTransaction.type",
+                    "PatchBuySellTransaction.type", "PatchDeliveryTransaction.type", "PatchCashTransfer.type",
+                    "PatchSecurityTransfer.type");
 
     private IEclipsePreferences node;
 
@@ -131,16 +141,19 @@ public class OpenApiSpecDriftTest
     /**
      * Adding a value to a closed enum breaks a client generated from the
      * document, adding one to an open enum does not - so every response enum
-     * has to be classified deliberately rather than defaulting to closed. A
-     * new enum fails here until it is added to one of the two lists.
+     * has to be classified deliberately rather than defaulting to closed.
+     * Request-only schema enums are classified separately because their values
+     * describe accepted input, not response values a client must understand.
      */
     @Test
-    public void testEveryResponseEnumIsClassifiedOpenOrClosed() throws IOException
+    public void testEverySchemaEnumIsClassifiedAsOpenClosedOrRequest() throws IOException
     {
         assertThat("response enums marked x-extensible-enum", documentedSchemaEnums("x-extensible-enum:"),
                         is(new TreeSet<>(OPEN_ENUMS)));
-        assertThat("response enums marked enum (closed for v1)", documentedSchemaEnums("enum:"),
-                        is(new TreeSet<>(CLOSED_ENUMS)));
+        var closedOrRequest = new TreeSet<>(CLOSED_ENUMS);
+        closedOrRequest.addAll(REQUEST_ENUMS);
+        assertThat("closed response enums and accepted request values", documentedSchemaEnums("enum:"),
+                        is(closedOrRequest));
     }
 
     @Test
@@ -491,6 +504,12 @@ public class OpenApiSpecDriftTest
             var matcher = FIELD_ERROR_CODE.matcher(Files.readString(path));
             while (matcher.find())
                 codes.add(matcher.group(1));
+            if (path.getFileName().toString().equals("TransactionInput.java"))
+            {
+                matcher = TRANSACTION_ERROR_CODE.matcher(Files.readString(path));
+                while (matcher.find())
+                    codes.add(matcher.group(1));
+            }
         }
 
         if (codes.isEmpty())
@@ -537,8 +556,8 @@ public class OpenApiSpecDriftTest
 
     /**
      * The properties under {@code components/schemas} that carry the given
-     * enum keyword, as "Schema.property". Request enums live in parameters,
-     * not schemas, so this is exactly the set of enums a response can carry.
+     * enum keyword, as "Schema.property". Includes reusable request-body
+     * schemas as well as response schemas; parameter enums are outside this set.
      */
     private Set<String> documentedSchemaEnums(String keyword) throws IOException
     {

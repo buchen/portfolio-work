@@ -48,7 +48,8 @@ public class CheckTransactionDateAction implements ImportAction
         for (Transaction tx : transactions)
         {
             if (tx.getDateTime() == null)
-                return new Status(Status.Code.ERROR, Messages.IssueTransactionWithoutDate);
+                return new Status(Status.Code.ERROR, Messages.IssueTransactionWithoutDate,
+                                "date-required", "dateTime"); //$NON-NLS-1$ //$NON-NLS-2$
         }
         return Status.OK_STATUS;
     }

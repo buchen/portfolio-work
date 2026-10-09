@@ -236,16 +236,16 @@ public final class McpEndpoint
 
         var missing = missingArguments(tool, arguments);
         if (!missing.isEmpty())
-            return toolError(explainMissing(router, tool, missing));
+            return toolError(explainMissing(router, tool, missing, request));
 
         try
         {
-            var response = McpDispatch.call(router, tool, arguments);
-            return toolResult(fit(router, tool, arguments, payloadOf(response), MAX_RESULT_CHARS));
+            var response = McpDispatch.call(router, tool, arguments, request);
+            return toolResult(fit(router, tool, arguments, payloadOf(response), MAX_RESULT_CHARS, request));
         }
         catch (ApiException e)
         {
-            return toolError(explain(router, tool, arguments, e));
+            return toolError(explain(router, tool, arguments, e, request));
         }
         catch (Exception e)
         {
@@ -297,7 +297,7 @@ public final class McpEndpoint
     }
 
     /** a missing {@code file} hands the files back inline, so the model recovers in this same call */
-    private static String explainMissing(Router router, McpTool tool, List<String> missing)
+    private static String explainMissing(Router router, McpTool tool, List<String> missing, Request caller)
     {
         if (!missing.contains("file"))
         {
@@ -306,11 +306,11 @@ public final class McpEndpoint
         }
 
         return tool.name() + " needs a `file`. There is no default file — every call names the portfolio it touches."
-                        + "\n\n" + McpExplain.describeFiles(sharedFiles(router));
+                        + "\n\n" + McpExplain.describeFiles(sharedFiles(router, caller));
     }
 
     /** the problem, disambiguated first where the API is deliberately vague */
-    private static String explain(Router router, McpTool tool, JsonObject arguments, ApiException problem)
+    private static String explain(Router router, McpTool tool, JsonObject arguments, ApiException problem, Request caller)
     {
         var needsFileList = "not-found".equals(problem.getType()) || "ambiguous-alias".equals(problem.getType());
         var fileArgument = arguments.has("file") && arguments.get("file").isJsonPrimitive()
@@ -320,7 +320,7 @@ public final class McpEndpoint
         if (!needsFileList || fileArgument == null)
             return McpExplain.explainProblem(problem, McpExplain.Context.of(tool.name()));
 
-        var files = sharedFiles(router);
+        var files = sharedFiles(router, caller);
         var shared = files == null ? null
                         : Boolean.valueOf(files.stream().anyMatch(file -> fileArgument.equals(file.id())
                                         || fileArgument.equals(file.alias())));
@@ -329,11 +329,11 @@ public final class McpEndpoint
     }
 
     /** null when even this could not be read: the problem at hand is the one worth reporting */
-    private static List<McpExplain.FileSummary> sharedFiles(Router router)
+    private static List<McpExplain.FileSummary> sharedFiles(Router router, Request caller)
     {
         try
         {
-            return McpDispatch.listFiles(router);
+            return McpDispatch.listFiles(router, caller);
         }
         catch (Exception e)
         {
@@ -348,7 +348,8 @@ public final class McpEndpoint
      * marker. Never silently - an unmarked truncation is the one outcome that
      * produces a confident wrong answer.
      */
-    private static String fit(Router router, McpTool tool, JsonObject arguments, JsonElement payload, int maxChars)
+    private static String fit(Router router, McpTool tool, JsonObject arguments, JsonElement payload, int maxChars,
+                    Request caller)
     {
         var rendered = McpEnvelope.render(tool, payload, List.of());
         if (rendered.length() <= maxChars)
@@ -364,7 +365,7 @@ public final class McpEndpoint
                 plan.get().keep().forEach(metrics::add);
                 narrowed.add("metrics", metrics);
 
-                var smaller = McpEnvelope.render(tool, payloadOf(McpDispatch.call(router, tool, narrowed)),
+                var smaller = McpEnvelope.render(tool, payloadOf(McpDispatch.call(router, tool, narrowed, caller)),
                                 plan.get().dropped());
                 if (smaller.length() <= maxChars)
                     return smaller;

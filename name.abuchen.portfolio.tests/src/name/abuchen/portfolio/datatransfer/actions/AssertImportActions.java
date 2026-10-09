@@ -9,6 +9,7 @@ import java.util.Map;
 
 import name.abuchen.portfolio.datatransfer.Extractor;
 import name.abuchen.portfolio.datatransfer.ImportAction;
+import name.abuchen.portfolio.datatransfer.TransactionRules;
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.Portfolio;
 
@@ -63,10 +64,7 @@ public class AssertImportActions
         }
     }
 
-    private static final ImportAction[] actions = new ImportAction[] { //
-                    new CheckTransactionDateAction(), new CheckValidTypesAction(),
-                    new CheckSecurityRelatedValuesAction(), new CheckCurrenciesAction(),
-                    new CheckForexGrossValueAction() };
+    private static final List<ImportAction> actions = TransactionRules.importProfile();
 
     public void check(List<Extractor.Item> items, String... currencyCode)
     {

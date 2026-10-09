@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -104,7 +105,9 @@ public class DevServer
 
         // Keep pairing testable, but give scripts a fixed token.
         var server = new RestApiServer(options.port(),
-                        token -> options.token().equals(token) || store.authenticate(token).isPresent(),
+                        token -> options.token().equals(token)
+                                        ? Optional.of(new ClientStore.ApiClient("dev", "Development client", null, null, true))
+                                        : store.authenticate(token),
                         ApiRoutes.create(registry, host, new PairingService(store, host)));
         try
         {

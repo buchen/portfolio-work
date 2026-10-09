@@ -1,7 +1,9 @@
 package name.abuchen.portfolio.datatransfer.actions;
 
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -34,16 +36,32 @@ public class CheckCurrenciesAction implements ImportAction
         CurrencyUnit unit = CurrencyUnit.getInstance(currency);
         return unit != null ? Status.OK_STATUS
                         : new Status(Status.Code.ERROR,
-                                        MessageFormat.format(Messages.MsgCheckUnsupportedCurrency, currency));
+                                        MessageFormat.format(Messages.MsgCheckUnsupportedCurrency, currency),
+                                        "unsupported-currency", "currencyCode"); //$NON-NLS-1$ //$NON-NLS-2$
     }
 
     @Override
     public Status process(AccountTransaction transaction, Account account)
     {
-        if (!account.getCurrencyCode().equals(transaction.getCurrencyCode()))
-            return new Status(Status.Code.ERROR,
+        return validate(transaction, account, false).stream().findFirst().orElse(Status.OK_STATUS);
+    }
+
+    public List<Status> validate(AccountTransaction transaction, Account account)
+    {
+        return validate(transaction, account, true);
+    }
+
+    private List<Status> validate(AccountTransaction transaction, Account account, boolean collectAll)
+    {
+        var errors = new ArrayList<Status>();
+        if (account != null && !account.getCurrencyCode().equals(transaction.getCurrencyCode()))
+            errors.add(new Status(Status.Code.ERROR,
                             MessageFormat.format(Messages.MsgCheckTransactionCurrencyDoesNotMatchAccount,
-                                            transaction.getCurrencyCode(), account.getCurrencyCode()));
+                                            transaction.getCurrencyCode(), account.getCurrencyCode()),
+                            "currency-mismatch", "amount.currency")); //$NON-NLS-1$ //$NON-NLS-2$
+
+        if (!collectAll && !errors.isEmpty())
+            return errors;
 
         if (transaction.getSecurity() != null)
         {
@@ -54,34 +72,52 @@ public class CheckCurrenciesAction implements ImportAction
                 // transaction.
 
                 if (transaction.getUnits().findAny().isPresent())
-                    return new Status(Status.Code.ERROR, MessageFormat
-                                    .format(Messages.MsgCheckTransactionMustNotHaveGrossAmount, transaction.getType()));
+                    errors.add(new Status(Status.Code.ERROR, MessageFormat
+                                    .format(Messages.MsgCheckTransactionMustNotHaveGrossAmount, transaction.getType()),
+                                    "units-not-allowed", "units")); //$NON-NLS-1$ //$NON-NLS-2$
             }
             else
             {
-                Status status = checkGrossValueAndUnitsAgainstSecurity(transaction);
-                if (status.getCode() != Status.Code.OK)
-                    return status;
+                checkGrossValueAndUnitsAgainstSecurity(transaction, errors, collectAll);
             }
         }
 
-        return Status.OK_STATUS;
+        return List.copyOf(errors);
     }
 
     @Override
     public Status process(PortfolioTransaction transaction, Portfolio portfolio)
     {
+        return validate(transaction, portfolio, false).stream().findFirst().orElse(Status.OK_STATUS);
+    }
+
+    public List<Status> validate(PortfolioTransaction transaction, Portfolio portfolio)
+    {
+        return validate(transaction, portfolio, true);
+    }
+
+    private List<Status> validate(PortfolioTransaction transaction, Portfolio portfolio, boolean collectAll)
+    {
+        var errors = new ArrayList<Status>();
         Security security = transaction.getSecurity();
         if (security == null)
-            return new Status(Status.Code.ERROR,
-                            MessageFormat.format(Messages.MsgCheckMissingSecurity, transaction.getType().toString()));
+            errors.add(new Status(Status.Code.ERROR,
+                            MessageFormat.format(Messages.MsgCheckMissingSecurity, transaction.getType().toString()),
+                            "instrument-required", "instrument")); //$NON-NLS-1$ //$NON-NLS-2$
 
-        Status status = checkGrossValueAndUnitsAgainstSecurity(transaction);
-        if (status.getCode() != Status.Code.OK)
-            return status;
+        if (security != null)
+            checkGrossValueAndUnitsAgainstSecurity(transaction, errors, collectAll);
 
-        if (transaction.getType() == PortfolioTransaction.Type.DELIVERY_INBOUND
-                        || transaction.getType() == PortfolioTransaction.Type.BUY)
+        if (!collectAll && !errors.isEmpty())
+            return errors;
+
+        // Entry validation reports retained units with incompatible currencies
+        // separately. They cannot participate in a monetary sum.
+        boolean canSumCharges = !collectAll || transaction.getUnits()
+                        .filter(u -> u.getType() == Unit.Type.TAX || u.getType() == Unit.Type.FEE)
+                        .allMatch(u -> u.getAmount().getCurrencyCode().equals(transaction.getCurrencyCode()));
+        if (canSumCharges && (transaction.getType() == PortfolioTransaction.Type.DELIVERY_INBOUND
+                        || transaction.getType() == PortfolioTransaction.Type.BUY))
         {
             // tax + fees must be < than transaction amount
             Money taxAndFees = transaction.getUnits() //
@@ -90,11 +126,12 @@ public class CheckCurrenciesAction implements ImportAction
                             .collect(MoneyCollectors.sum(transaction.getCurrencyCode()));
 
             if (!transaction.getMonetaryAmount().isGreaterOrEqualTo(taxAndFees))
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckTaxAndFeesTooHigh,
-                                Values.Money.format(transaction.getMonetaryAmount()), Values.Money.format(taxAndFees)));
+                errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckTaxAndFeesTooHigh,
+                                Values.Money.format(transaction.getMonetaryAmount()), Values.Money.format(taxAndFees)),
+                                "fees-and-taxes-exceed-amount", "units")); //$NON-NLS-1$ //$NON-NLS-2$
         }
 
-        return Status.OK_STATUS;
+        return List.copyOf(errors);
     }
 
     @Override
@@ -127,13 +164,17 @@ public class CheckCurrenciesAction implements ImportAction
         return process(entry.getTargetTransaction(), target);
     }
 
-    private Status checkGrossValueAndUnitsAgainstSecurity(Transaction transaction)
+    private void checkGrossValueAndUnitsAgainstSecurity(Transaction transaction, List<Status> errors, boolean collectAll)
     {
         String securityCurrency = transaction.getSecurity().getCurrencyCode();
         if (securityCurrency == null)
-            return new Status(Status.Code.ERROR, Messages.MsgCheckSecurityWithoutCurrency);
+        {
+            errors.add(new Status(Status.Code.ERROR, Messages.MsgCheckSecurityWithoutCurrency,
+                            "instrument-currency-required", "instrument")); //$NON-NLS-1$ //$NON-NLS-2$
+            return;
+        }
 
-        if (transaction.getCurrencyCode().equals(securityCurrency))
+        if (securityCurrency.equals(transaction.getCurrencyCode()))
         {
             // then gross value unit must not be set
             Optional<Unit> grossValue = transaction.getUnit(Transaction.Unit.Type.GROSS_VALUE);
@@ -141,29 +182,43 @@ public class CheckCurrenciesAction implements ImportAction
             {
                 String grossValueCurrencyCode = grossValue.get().getForex() != null
                                 ? grossValue.get().getForex().getCurrencyCode() : ""; //$NON-NLS-1$
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitNotValid,
-                                grossValueCurrencyCode, securityCurrency));
+                errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitNotValid,
+                                grossValueCurrencyCode, securityCurrency),
+                                "gross-value-not-allowed", "units")); //$NON-NLS-1$ //$NON-NLS-2$
             }
+
+            if (!collectAll && !errors.isEmpty())
+                return;
 
             // then other units must not have any forex information
             Optional<Unit> unit = transaction.getUnits().filter(u -> u.getForex() != null).findAny();
             if (unit.isPresent())
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckUnitForexNotValid,
-                                Values.Money.format(unit.get().getForex())));
+                errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckUnitForexNotValid,
+                                Values.Money.format(unit.get().getForex())),
+                                "forex-not-allowed", "units")); //$NON-NLS-1$ //$NON-NLS-2$
         }
         else
         {
             // then gross value must be set
             Optional<Unit> grossValue = transaction.getUnit(Transaction.Unit.Type.GROSS_VALUE);
             if (!grossValue.isPresent())
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitMissing,
-                                transaction.getCurrencyCode(), securityCurrency));
+            {
+                errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitMissing,
+                                transaction.getCurrencyCode(), securityCurrency),
+                                "gross-value-required", "units")); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+            else
+            {
 
-            // then gross value forex must match security
-            String forex = grossValue.get().getForex() != null ? grossValue.get().getForex().getCurrencyCode() : null;
-            if (!securityCurrency.equals(forex))
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitForexMismatch,
-                                forex, securityCurrency));
+                // then gross value forex must match security
+                String forex = grossValue.get().getForex() != null ? grossValue.get().getForex().getCurrencyCode() : null;
+                if (!securityCurrency.equals(forex))
+                    errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckGrossValueUnitForexMismatch,
+                                    forex, securityCurrency), "forex-currency-mismatch", "units")); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+
+            if (!collectAll && !errors.isEmpty())
+                return;
 
             // then other units must have matching currency (if they have forex)
             Optional<Unit> unit = transaction.getUnits() //
@@ -171,11 +226,11 @@ public class CheckCurrenciesAction implements ImportAction
                             .filter(u -> !u.getForex().getCurrencyCode().equals(securityCurrency)) //
                             .findAny();
             if (unit.isPresent())
-                return new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckUnitForexMismatch,
-                                Values.Money.format(unit.get().getForex()), securityCurrency));
+                errors.add(new Status(Status.Code.ERROR, MessageFormat.format(Messages.MsgCheckUnitForexMismatch,
+                                Values.Money.format(unit.get().getForex()), securityCurrency),
+                                "forex-currency-mismatch", "units")); //$NON-NLS-1$ //$NON-NLS-2$
         }
 
-        return Status.OK_STATUS;
     }
 
 }

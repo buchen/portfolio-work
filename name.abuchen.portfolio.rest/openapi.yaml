@@ -126,10 +126,8 @@ info:
 
     ## Methods
 
-    A path serves only the methods listed for it in this document; the only
-    `POST` endpoint is the pairing request — v1 has **no create endpoints for
-    portfolio data**. Calling any method that a path does not list returns
-    `405 method-not-allowed`.
+    A path serves only the methods listed for it in this document. Calling any
+    method that a path does not list returns `405 method-not-allowed`.
 
     ## Query parameters
 
@@ -197,6 +195,8 @@ tags:
     description: The statement of assets — every holding valued at a date
   - name: Performance
     description: Return and value-change of the file over an interval
+  - name: Transactions
+    description: Stored transaction events, folding linked records.
   - name: Trades
     description: Matched buy/sell pairs, computed from the transactions
 
@@ -732,6 +732,233 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/files/{file}/transactions:
+    parameters:
+      - $ref: "#/components/parameters/File"
+    post:
+      operationId: createTransaction
+      tags: [Transactions]
+      summary: Create a transaction event
+      description: |
+        Creates an event in memory and marks the file dirty; does not save it.
+        References must already exist. All invalid or unknown fields are reported
+        together with 422, without inserting any records. Fees, taxes and grossValue
+        are read-only; use units for charges and foreign-currency detail.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/CreateCashTransaction"
+                - $ref: "#/components/schemas/CreateBuySellTransaction"
+                - $ref: "#/components/schemas/CreateDeliveryTransaction"
+                - $ref: "#/components/schemas/CreateCashTransfer"
+                - $ref: "#/components/schemas/CreateSecurityTransfer"
+      responses:
+        "201":
+          description: Created transaction
+          headers:
+            Location:
+              description: Path of the created event.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      operationId: listTransactions
+      tags: [Transactions]
+      summary: List stored transaction events
+      description: |
+        One event per buy/sell or transfer, ordered by dateTime ascending, then canonical
+        uuid (an arbitrary but fixed tie-break). Filters combine with AND; account filters
+        match either transfer endpoint. from/to are inclusive calendar dates. Unknown
+        types, malformed dates, reversed ranges and unknown filter UUIDs return 400.
+      parameters:
+        - name: type
+          in: query
+          description: Comma-separated event types; omitted means all types.
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Earliest transaction date, inclusive (YYYY-MM-DD).
+          schema:
+            type: string
+        - name: to
+          in: query
+          description: Latest transaction date, inclusive (YYYY-MM-DD).
+          schema:
+            type: string
+        - name: instrument
+          in: query
+          description: Instrument UUID.
+          schema:
+            type: string
+        - name: cashAccount
+          in: query
+          description: Cash account UUID, including either transfer endpoint.
+          schema:
+            type: string
+        - name: investmentAccount
+          in: query
+          description: Investment account UUID, including either transfer endpoint.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All matching events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/files/{file}/transactions/{uuid}:
+    parameters:
+      - $ref: "#/components/parameters/File"
+      - $ref: "#/components/parameters/Uuid"
+    get:
+      operationId: getTransaction
+      tags: [Transactions]
+      summary: Read one transaction event
+      description: |
+        Either record UUID of a linked event resolves to its canonical event UUID.
+      responses:
+        "200":
+          description: The event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      operationId: patchTransaction
+      tags: [Transactions]
+      summary: Edit a transaction event
+      description: |
+        JSON Merge Patch (RFC 7386). Either linked record UUID edits the whole event,
+        preserving both UUIDs, owners, cross-entry links and investment-plan membership.
+        Omitted fields stay unchanged; null removes optional fields; arrays replace in full.
+        The existing event type determines which family schema applies. Type and account
+        references are immutable (422 immutable-field); repeating their existing values is allowed.
+        Unknown or read-only fields, including grossValue, fees, taxes, uuid, updatedAt and
+        reference names, return 422 unknown-field even when null or unchanged.
+        The complete resulting event must pass the creation rules before anything changes.
+        An event marked integrity: missing-counterpart returns 409 incomplete-event.
+        A missing date must be supplied to satisfy validation.
+        Source is preserved when omitted. An unchanged valid event causes no dirty flag,
+        timestamps or log entry. Available through REST only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              anyOf:
+                - $ref: "#/components/schemas/PatchCashTransaction"
+                - $ref: "#/components/schemas/PatchBuySellTransaction"
+                - $ref: "#/components/schemas/PatchDeliveryTransaction"
+                - $ref: "#/components/schemas/PatchCashTransfer"
+                - $ref: "#/components/schemas/PatchSecurityTransfer"
+      responses:
+        "200":
+          description: The updated canonical event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteTransaction
+      tags: [Transactions]
+      summary: Delete a transaction event
+      description: |
+        Deletes the whole event. Either linked record UUID removes both records.
+        An event marked integrity: missing-counterpart deletes only the surviving record.
+        Rejected with `409 delete-blocked` if either record belongs to an investment
+        plan: deletion would remove a plan association not exposed in the event.
+        Handle these transactions in the UI. Available through REST only.
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "423":
+          $ref: "#/components/responses/Locked"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1583,6 +1810,732 @@ components:
         message:
           type: string
 
+    TransactionEvent:
+      description: |
+        A stored event, addressed by the investment-account record for buy/sell,
+        outgoing record for transfers, or the single record otherwise. Common
+        metadata and units come from that canonical record. Unknown future types
+        must be accepted by clients, without assuming their account fields.
+        An unlinked record uses its own UUID and has integrity: missing-counterpart.
+        Only its surviving account reference is present; amount and units belong
+        to that record, including for an incoming transfer. Missing counterparts
+        and their amounts are never inferred.
+      oneOf:
+        - $ref: "#/components/schemas/BuyTransaction"
+        - $ref: "#/components/schemas/SellTransaction"
+        - $ref: "#/components/schemas/DeliveryInboundTransaction"
+        - $ref: "#/components/schemas/DeliveryOutboundTransaction"
+        - $ref: "#/components/schemas/SecurityTransferTransaction"
+        - $ref: "#/components/schemas/CashTransferTransaction"
+        - $ref: "#/components/schemas/DepositTransaction"
+        - $ref: "#/components/schemas/RemovalTransaction"
+        - $ref: "#/components/schemas/InterestTransaction"
+        - $ref: "#/components/schemas/InterestChargeTransaction"
+        - $ref: "#/components/schemas/FeeTransaction"
+        - $ref: "#/components/schemas/FeeRefundTransaction"
+        - $ref: "#/components/schemas/TaxTransaction"
+        - $ref: "#/components/schemas/TaxRefundTransaction"
+        - $ref: "#/components/schemas/DividendTransaction"
+
+    TransactionFields:
+      type: object
+      required: [uuid, type, dateTime, shares, amount, grossValue, fees, taxes, units]
+      properties:
+        uuid:
+          type: string
+        type:
+          type: string
+          description: Event kind; clients must accept unknown future values.
+          x-extensible-enum: [buy, sell, delivery-inbound, delivery-outbound, security-transfer, cash-transfer, deposit, removal, interest, interest-charge, fee, fee-refund, tax, tax-refund, dividend]
+        dateTime:
+          type: [string, "null"]
+          description: Local date-time with seconds, YYYY-MM-DDTHH:MM:SS, without offset. Null when the stored record has no date; sorts last and is excluded by date filters.
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Canonical record's update instant; absent if unavailable.
+        integrity:
+          type: string
+          readOnly: true
+          x-extensible-enum: [missing-counterpart]
+          description: Present when a buy, sell or transfer record has no linked counterpart. Missing account references are omitted. Absent for complete events.
+        note:
+          type: string
+        source:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/InstrumentReference"
+        shares:
+          type: number
+          description: Stored shares, including zero for cash events; up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/MonetaryValue"
+        grossValue:
+          allOf:
+            - $ref: "#/components/schemas/MonetaryValue"
+          readOnly: true
+          description: Derived from amount and fees/taxes in the transaction currency.
+        fees:
+          $ref: "#/components/schemas/MonetaryValue"
+        taxes:
+          $ref: "#/components/schemas/MonetaryValue"
+        units:
+          type: array
+          description: Complete units of the canonical record; totals are positive magnitudes.
+          items:
+            $ref: "#/components/schemas/TransactionUnit"
+
+    CreateCashTransaction:
+      type: object
+      additionalProperties: false
+      required: [type, dateTime, cashAccount, amount]
+      properties:
+        type:
+          type: string
+          enum: [deposit, removal, interest, interest-charge, fee, fee-refund, tax, tax-refund, dividend]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+          description: Required for dividends; optional for fee/tax families; otherwise forbidden.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Net amount; zero is allowed when derived gross remains positive.
+        shares:
+          type: number
+          minimum: 0
+          description: Up to eight decimal places; nonzero only for dividends. Defaults to zero.
+        exDate:
+          type: [string, "null"]
+          description: Local YYYY-MM-DDTHH:MM:SS; requires an instrument and cannot have a later date than dateTime.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fee units only for dividends; tax units for dividends or interest. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateBuySellTransaction:
+      type: object
+      additionalProperties: false
+      description: Linked investment and cash event. Net amount must be positive and use the cash account currency.
+      required: [type, dateTime, investmentAccount, cashAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [buy, sell]
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fees, taxes and forex detail; derived gross must be positive. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateDeliveryTransaction:
+      type: object
+      additionalProperties: false
+      description: |
+        Investment-only event. The investment account must have a reference cash account.
+        Gross must be positive; outbound net may be zero when fees and taxes consume gross.
+        Inbound net must be positive. Amount currency is selectable.
+      required: [type, dateTime, investmentAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [delivery-inbound, delivery-outbound]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          description: Fees, taxes and forex detail; derived gross must be positive. Defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateCashTransfer:
+      type: object
+      additionalProperties: false
+      description: |
+        Linked transfer between distinct cash accounts. Both amounts must be positive
+        and use their respective account currencies. Same-currency amounts must match
+        and units must be empty. Different currencies require one gross-value unit:
+        its amount equals amount, its forex equals targetAmount, and its exchangeRate
+        converts incoming currency to outgoing currency. Fees and taxes are not allowed.
+      required: [type, dateTime, fromCashAccount, toCashAccount, amount, targetAmount]
+      properties:
+        type:
+          type: string
+          enum: [cash-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromCashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        toCashAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Positive outgoing amount.
+        targetAmount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Positive incoming amount; required even for same-currency transfers.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          maxItems: 1
+          description: Forex gross-value detail only; defaults to empty.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    CreateSecurityTransfer:
+      type: object
+      additionalProperties: false
+      description: Linked transfer between distinct investment accounts. Amount must be positive and use the instrument currency.
+      required: [type, dateTime, fromInvestmentAccount, toInvestmentAccount, instrument, shares, amount]
+      properties:
+        type:
+          type: string
+          enum: [security-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        toInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityInput"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Defaults to the authenticated paired client's name when omitted; null leaves it unset.
+        units:
+          type: array
+          maxItems: 0
+          description: Must be empty; security transfers have no fees, taxes or forex units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    PatchCashTransaction:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [deposit, removal, interest, interest-charge, fee, fee-refund, tax, tax-refund, dividend]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        instrument:
+          anyOf:
+            - $ref: "#/components/schemas/TransactionEntityPatch"
+            - type: "null"
+          description: Required for dividends; optional for fee/tax families; otherwise forbidden.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+          description: Net amount; zero is allowed when derived gross remains positive.
+        shares:
+          type: [number, "null"]
+          minimum: 0
+          description: Up to eight decimal places; nonzero only for dividends. Null clears optional shares to zero.
+        exDate:
+          type: [string, "null"]
+          description: Local YYYY-MM-DDTHH:MM:SS; requires an instrument and cannot have a later date than dateTime.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Omission preserves the recorded source; null clears it.
+        units:
+          type: [array, "null"]
+          description: Fee units only for dividends; tax units for dividends or interest. Null removes all units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    PatchBuySellTransaction:
+      type: object
+      additionalProperties: false
+      description: Linked investment and cash event. Net amount must be positive and use the cash account currency.
+      properties:
+        type:
+          type: string
+          enum: [buy, sell]
+        cashAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Omission preserves the recorded source; null clears it.
+        units:
+          type: [array, "null"]
+          description: Fees, taxes and forex detail; derived gross must be positive. Null removes all units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    PatchDeliveryTransaction:
+      type: object
+      additionalProperties: false
+      description: |
+        Investment-only event. The investment account must have a reference cash account.
+        Gross must be positive; outbound net may be zero when fees and taxes consume gross.
+        Inbound net must be positive. Amount currency is selectable.
+      properties:
+        type:
+          type: string
+          enum: [delivery-inbound, delivery-outbound]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        investmentAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Omission preserves the recorded source; null clears it.
+        units:
+          type: [array, "null"]
+          description: Fees, taxes and forex detail; derived gross must be positive. Null removes all units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    PatchCashTransfer:
+      type: object
+      additionalProperties: false
+      description: |
+        Linked transfer between distinct cash accounts. Both amounts must be positive
+        and use their respective account currencies. Same-currency amounts must match
+        and units must be empty. Different currencies require one gross-value unit:
+        its amount equals amount, its forex equals targetAmount, and its exchangeRate
+        converts incoming currency to outgoing currency. Fees and taxes are not allowed.
+      properties:
+        type:
+          type: string
+          enum: [cash-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromCashAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        toCashAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+          description: Positive outgoing amount.
+        targetAmount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+          description: Positive incoming amount; required even for same-currency transfers.
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Omission preserves the recorded source; null clears it.
+        units:
+          type: [array, "null"]
+          maxItems: 1
+          description: Forex gross-value detail only; null removes all units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    PatchSecurityTransfer:
+      type: object
+      additionalProperties: false
+      description: Linked transfer between distinct investment accounts. Amount must be positive and use the instrument currency.
+      properties:
+        type:
+          type: string
+          enum: [security-transfer]
+        dateTime:
+          type: string
+          description: Local YYYY-MM-DDTHH:MM:SS, with seconds and without offset.
+        fromInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        toInvestmentAccount:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        instrument:
+          $ref: "#/components/schemas/TransactionEntityPatch"
+        shares:
+          type: number
+          exclusiveMinimum: 0
+          description: Positive shares with up to eight decimal places.
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyPatch"
+        note:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+          description: Omission preserves the recorded source; null clears it.
+        units:
+          type: [array, "null"]
+          maxItems: 0
+          description: Must be empty; security transfers have no fees, taxes or forex units.
+          items:
+            $ref: "#/components/schemas/TransactionUnitInput"
+
+    TransactionEntityPatch:
+      type: object
+      additionalProperties: false
+      description: Merge into the current reference. Owner UUIDs cannot change.
+      properties:
+        uuid:
+          type: string
+
+    TransactionMoneyPatch:
+      type: object
+      additionalProperties: false
+      description: Merge into the current money value; both properties must remain present.
+      properties:
+        value:
+          type: number
+          minimum: 0
+          description: Exactly representable with two decimal places; extra trailing zeros allowed.
+        currency:
+          type: string
+
+    TransactionEntityInput:
+      type: object
+      additionalProperties: false
+      required: [uuid]
+      properties:
+        uuid:
+          type: string
+          description: UUID of an existing entity in this file.
+
+    TransactionMoneyInput:
+      type: object
+      additionalProperties: false
+      required: [value, currency]
+      properties:
+        value:
+          type: number
+          minimum: 0
+          description: Two decimal places, independent of currency; extra trailing zeros accepted. Must fit the model's signed 64-bit cents.
+        currency:
+          type: string
+          description: Known currency code.
+
+    TransactionUnitInput:
+      type: object
+      additionalProperties: false
+      required: [type, amount]
+      properties:
+        type:
+          type: string
+          enum: [gross-value, fee, tax]
+        amount:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Amount in the transaction currency; a gross-value unit must equal the derived gross exactly.
+        forex:
+          $ref: "#/components/schemas/TransactionMoneyInput"
+          description: Foreign amount in the instrument currency; required for gross-value units and whenever exchangeRate is given.
+        exchangeRate:
+          type: number
+          exclusiveMinimum: 0
+          description: Transaction-currency units per forex unit; required together with forex. Same-currency gross-value units are forbidden.
+
+    TransactionUnit:
+      type: object
+      required: [type, amount]
+      properties:
+        type:
+          type: string
+          description: Unit kind; clients must preserve unknown future values.
+          x-extensible-enum: [gross-value, fee, tax]
+        amount:
+          $ref: "#/components/schemas/MonetaryValue"
+        forex:
+          $ref: "#/components/schemas/MonetaryValue"
+        exchangeRate:
+          type: number
+          description: Transaction-currency units per one forex-currency unit. Present together with forex.
+
+    CashAccountReference:
+      type: object
+      required: [uuid, name, currencyCode]
+      properties:
+        uuid:
+          type: string
+        name:
+          type: string
+        currencyCode:
+          type: string
+
+    BuyTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: buy
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+
+    SellTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: sell
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+
+    DeliveryInboundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [investmentAccount, instrument]
+          properties:
+            type:
+              const: delivery-inbound
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    DeliveryOutboundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [investmentAccount, instrument]
+          properties:
+            type:
+              const: delivery-outbound
+            investmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    SecurityTransferTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: security-transfer
+            fromInvestmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+            toInvestmentAccount:
+              $ref: "#/components/schemas/InvestmentAccountReference"
+
+    CashTransferTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          properties:
+            type:
+              const: cash-transfer
+            fromCashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            toCashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            targetAmount:
+              $ref: "#/components/schemas/MonetaryValue"
+      description: For complete events, amount is outgoing cash and targetAmount is incoming cash in the destination currency. Forex units use the outgoing currency as amount and incoming currency as forex. With integrity missing-counterpart, amount belongs to the surviving record, only its fromCashAccount or toCashAccount is present, and targetAmount is omitted.
+
+    DepositTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: deposit
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    RemovalTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: removal
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    InterestTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: interest
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    InterestChargeTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: interest-charge
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    FeeTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: fee
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    FeeRefundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: fee-refund
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    TaxTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: tax
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    TaxRefundTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount]
+          properties:
+            type:
+              const: tax-refund
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
+    DividendTransaction:
+      allOf:
+        - $ref: "#/components/schemas/TransactionFields"
+        - type: object
+          required: [cashAccount, instrument]
+          properties:
+            type:
+              const: dividend
+            cashAccount:
+              $ref: "#/components/schemas/CashAccountReference"
+            exDate:
+              type: string
+              description: Optional local ex-date/time, YYYY-MM-DDTHH:MM:SS.
+
     InstrumentReference:
       type: object
       description: |
@@ -2402,8 +3355,14 @@ components:
             - invalid-range
             - too-long
             - unknown-field
+            - immutable-field
+            - invalid-date
+            - out-of-range
+            - too-many-decimals
+            - unsupported-currency
             - unknown-parameter
             - duplicate-parameter
+            - unknown-entity
             - unknown-currency
             - locked-by-transactions
             - exchange-rate-requires-currency
@@ -2431,12 +3390,15 @@ components:
             below; note especially that a **404 never distinguishes** an unknown
             file from a file that exists but is not enabled, that
             `no-activity-in-period` is the one 404 that says the addressed entity
-            *does* exist, and that the three
+            *does* exist, and that the four
             **409** kinds each call for a different response:
             `file-not-open` (a human must open the file), `ambiguous-alias` (retry
-            with the `id`), `delete-blocked` (give up — the instrument is referenced).
+            with the `id`), `delete-blocked` (the instrument is referenced or the
+            transaction belongs to an investment plan; handle it in the UI),
+            `incomplete-event` (PATCH refused because a counterpart is missing;
+            delete the surviving record or repair it in the application).
             `method-not-allowed` (405) is returned for any method a path does not
-            list; v1 has no create endpoints.
+            list.
 
             **Open set:** new problem types may be added within v1. Treat an
             unknown `type` by its HTTP `status`.
@@ -2452,6 +3414,7 @@ components:
             - https://portfolio-performance.info/rest/problems/file-not-open
             - https://portfolio-performance.info/rest/problems/ambiguous-alias
             - https://portfolio-performance.info/rest/problems/delete-blocked
+            - https://portfolio-performance.info/rest/problems/incomplete-event
             - https://portfolio-performance.info/rest/problems/validation
             - https://portfolio-performance.info/rest/problems/user-interaction
             - https://portfolio-performance.info/rest/problems/pairing-pending
@@ -2544,7 +3507,8 @@ components:
         `file-not-open` (enabled but not open — a human must open it),
         `ambiguous-alias` (the alias matches several records — use the `id`), or, on
         delete, `delete-blocked` (the instrument is referenced by transactions or
-        plans).
+        plans, or the transaction belongs to an investment plan). On transaction
+        patch, `incomplete-event` means the record has no linked counterpart.
       content:
         application/problem+json:
           schema:

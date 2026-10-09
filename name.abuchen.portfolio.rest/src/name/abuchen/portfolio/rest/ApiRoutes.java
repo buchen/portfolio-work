@@ -1,6 +1,7 @@
 package name.abuchen.portfolio.rest;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.function.BiFunction;
 
 import com.google.gson.JsonObject;
@@ -25,6 +26,8 @@ import name.abuchen.portfolio.rest.internal.Response;
 import name.abuchen.portfolio.rest.internal.Router;
 import name.abuchen.portfolio.rest.internal.SecuritiesHandler;
 import name.abuchen.portfolio.rest.internal.TradesHandler;
+import name.abuchen.portfolio.rest.internal.TransactionChangeLog;
+import name.abuchen.portfolio.rest.internal.TransactionsHandler;
 import name.abuchen.portfolio.rest.internal.VersionHandler;
 import name.abuchen.portfolio.rest.internal.mcp.McpEndpoint;
 import name.abuchen.portfolio.rest.spi.HostApplication;
@@ -58,7 +61,7 @@ public final class ApiRoutes
         var files = new FilesHandler(registry, host);
 
         // the MCP front door: registered on this same table and dispatching
-        // back into it, so the sixteen tools cannot drift from the routes they
+        // back into it, so the tools cannot drift from the routes they
         // are - and GET and DELETE get the router's own 405
         McpEndpoint.register(router);
 
@@ -107,6 +110,39 @@ public final class ApiRoutes
                         (client, req) -> Response.json(200, PortfoliosHandler.list(client))));
         router.add("GET", "/v1/files/{file}/investment-accounts/{uuid}", read(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
                         (client, req) -> Response.json(200, PortfoliosHandler.get(client, req.pathParam("uuid"))))); //$NON-NLS-1$
+
+        router.add("GET", "/v1/files/{file}/transactions", read(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (client, req) -> Response.json(200, TransactionsHandler.list(client,
+                                        req.queryParam("type"), req.queryParam("from"), req.queryParam("to"), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                                        req.queryParam("instrument"), req.queryParam("cashAccount"), //$NON-NLS-1$ //$NON-NLS-2$
+                                        req.queryParam("investmentAccount")))), //$NON-NLS-1$
+                        "type", "from", "to", "instrument", "cashAccount", "investmentAccount"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
+        router.add("GET", "/v1/files/{file}/transactions/{uuid}", read(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (client, req) -> Response.json(200, TransactionsHandler.get(client, req.pathParam("uuid"))))); //$NON-NLS-1$
+        router.add("POST", "/v1/files/{file}/transactions", write(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (file, req) -> {
+                            var entity = TransactionsHandler.create(file.getClient(), parseObject(req), req.clientName());
+                            var uuid = entity.get("uuid").getAsString(); //$NON-NLS-1$
+                            TransactionChangeLog.recordCreation(file.getLabel(), uuid);
+                            var response = Response.json(201, entity);
+                            return new Response(response.status(), response.contentType(), response.body(),
+                                            Map.of("Location", req.path() + "/" + uuid)); //$NON-NLS-1$ //$NON-NLS-2$
+                        }));
+
+        router.add("PATCH", "/v1/files/{file}/transactions/{uuid}", write(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (file, req) -> {
+                            var result = TransactionsHandler.patch(file.getClient(), req.pathParam("uuid"), parseObject(req)); //$NON-NLS-1$
+                            if (result.changed())
+                                TransactionChangeLog.recordChange(file.getLabel(), result.entity().get("uuid").getAsString()); //$NON-NLS-1$
+                            return Response.json(200, result.entity());
+                        }));
+
+        router.add("DELETE", "/v1/files/{file}/transactions/{uuid}", write(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
+                        (file, req) -> {
+                            var uuid = TransactionsHandler.delete(file.getClient(), req.pathParam("uuid")); //$NON-NLS-1$
+                            TransactionChangeLog.recordDeletion(file.getLabel(), uuid);
+                            return Response.noContent();
+                        }));
 
         router.add("GET", "/v1/files/{file}/holdings", calc(resolver, host, //$NON-NLS-1$ //$NON-NLS-2$
                         (context, req) -> Response.json(200, HoldingsHandler.list(context.client(), context.factory(),

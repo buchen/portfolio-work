@@ -1,6 +1,6 @@
 {
   "notice": {
-    "about": "Every word the MCP endpoint shows a model: the sixteen tool names, their descriptions, their argument descriptions and their annotations. Read by the /mcp endpoint in this bundle.",
+    "about": "Every word the MCP endpoint shows a model: the tool names, their descriptions, their argument descriptions and their annotations. Read by the /mcp endpoint in this bundle.",
     "stability": "Descriptions and inputSchema are published contract, not prose to tidy. Claude Desktop hashes a tool's description and parameters into the user's \"always allow\" grant, so revising wording silently revokes it. Change these words deliberately, in a release, on purpose.",
     "language": "English only, and excluded from translation. This text is read by a model, not by the user.",
     "fields": {
@@ -1052,6 +1052,136 @@
           "arg": "reportingCurrency",
           "where": "query",
           "wire": "reportingCurrency"
+        }
+      ]
+    },
+    {
+      "name": "pp_list_transactions",
+      "operationId": "listTransactions",
+      "method": "GET",
+      "pathTemplate": "/v1/files/{file}/transactions",
+      "description": "List stored transaction events in a file, ordered by dateTime then canonical UUID. A buy, sell or transfer is one event, never two records. Filters combine with AND; dates are inclusive. Amounts and units retain their recorded currencies, without conversion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file id or alias from pp_list_files."
+          },
+          "type": {
+            "type": "string",
+            "description": "Comma-separated transaction event types. Omit to include all types."
+          },
+          "from": {
+            "type": "string",
+            "description": "Earliest transaction date, inclusive, YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "description": "Latest transaction date, inclusive, YYYY-MM-DD."
+          },
+          "instrument": {
+            "type": "string",
+            "description": "Filter by instrument UUID."
+          },
+          "cashAccount": {
+            "type": "string",
+            "description": "Filter by cash account UUID, matching either transfer endpoint."
+          },
+          "investmentAccount": {
+            "type": "string",
+            "description": "Filter by investment account UUID, matching either transfer endpoint."
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "bindings": [
+        {
+          "arg": "file",
+          "where": "path",
+          "wire": "file"
+        },
+        {
+          "arg": "type",
+          "where": "query",
+          "wire": "type"
+        },
+        {
+          "arg": "from",
+          "where": "query",
+          "wire": "from"
+        },
+        {
+          "arg": "to",
+          "where": "query",
+          "wire": "to"
+        },
+        {
+          "arg": "instrument",
+          "where": "query",
+          "wire": "instrument"
+        },
+        {
+          "arg": "cashAccount",
+          "where": "query",
+          "wire": "cashAccount"
+        },
+        {
+          "arg": "investmentAccount",
+          "where": "query",
+          "wire": "investmentAccount"
+        }
+      ]
+    },
+    {
+      "name": "pp_get_transaction",
+      "operationId": "getTransaction",
+      "method": "GET",
+      "pathTemplate": "/v1/files/{file}/transactions/{uuid}",
+      "description": "Read a stored transaction event by either record UUID. Buys, sells and transfers return one event with its canonical UUID, matching pp_list_transactions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file id or alias from pp_list_files."
+          },
+          "uuid": {
+            "type": "string",
+            "description": "Either record UUID of the transaction event."
+          }
+        },
+        "required": [
+          "file",
+          "uuid"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "bindings": [
+        {
+          "arg": "file",
+          "where": "path",
+          "wire": "file"
+        },
+        {
+          "arg": "uuid",
+          "where": "path",
+          "wire": "uuid"
         }
       ]
     }

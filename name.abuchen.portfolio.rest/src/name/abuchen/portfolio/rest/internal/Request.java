@@ -9,14 +9,16 @@ import java.util.TreeMap;
 /**
  * One request as a handler sees it.
  * <p/>
- * The last two components exist for {@code /mcp} alone, which ADR 0005 lets
+ * Authorization and user agent support {@code /mcp}, which ADR 0005 lets
  * through with or without a token because it decides authorisation per JSON-RPC
  * method. A handler that has to report who was refused, and whether they
  * offered a token at all, needs both facts carried to it. Every {@code /v1}
  * route is unreachable without a valid token, so it only ever sees VALID.
+ * The client name comes from authentication and supplies the default source
+ * of newly created transactions.
  */
 public record Request(String method, String path, Map<String, String> pathParams, Map<String, String> queryParams,
-                byte[] body, Authorization authorization, String userAgent)
+                byte[] body, Authorization authorization, String userAgent, String clientName)
 {
     /** the preference page says which: "you forgot the header" and "your token is wrong" differ */
     public enum Authorization
@@ -27,7 +29,7 @@ public record Request(String method, String path, Map<String, String> pathParams
     public Request(String method, String path, Map<String, String> pathParams, Map<String, String> queryParams,
                     byte[] body)
     {
-        this(method, path, pathParams, queryParams, body, Authorization.VALID, null);
+        this(method, path, pathParams, queryParams, body, Authorization.VALID, null, null);
     }
 
     public Request(String method, String path, Map<String, String> pathParams, byte[] body)

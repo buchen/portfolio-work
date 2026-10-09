@@ -207,7 +207,7 @@ public class McpToolCallTest
     private JsonObject resultOf(String body)
     {
         var request = new Request("POST", "/mcp", Map.of(), Map.of(), body.getBytes(StandardCharsets.UTF_8),
-                        Request.Authorization.VALID, null);
+                        Request.Authorization.VALID, null, "Test client");
         var response = McpEndpoint.handle(router, request);
         return JsonParser.parseString(new String(response.body(), StandardCharsets.UTF_8)).getAsJsonObject()
                         .getAsJsonObject("result");

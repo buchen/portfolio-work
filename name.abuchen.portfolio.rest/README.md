@@ -64,7 +64,7 @@ carries an `Origin` header is rejected — a web page cannot reach this API, by 
 
 ## The MCP endpoint
 
-`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, offering sixteen of the
+`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, offering eighteen of the
 operations above as named tools. Point a client at `http://127.0.0.1:5712/mcp` and give it an
 `Authorization: Bearer …` header — **Add client** assembles both, at the one moment the token
 exists. Same switch, same port, same tokens; there is nothing extra to install.
@@ -163,6 +163,83 @@ on a client's behalf. Watchlist and taxonomy membership do not block the delete.
 {"uuid": "d9f0…", "name": "Broker", "referenceCashAccount": "c4b2…", "note": "…"}
 ```
 
+### `GET /v1/files/{file}/transactions[/{uuid}]`
+
+Returns stored **events**: a buy/sell or a transfer appears once, with both account references.
+The UUID is the investment-account record for a buy/sell, the outgoing record for a transfer,
+and the record itself otherwise. Either linked record UUID reads the same event. See
+[ADR 0006](../docs/adr/0006-a-transaction-is-an-event.md) for the identity decision.
+
+An unlinked buy, sell or transfer remains visible under its own UUID, with
+`integrity: "missing-counterpart"` and only its surviving account reference. Amounts and units
+belong to that record; for an incoming transfer, `amount` is incoming. Missing references and
+`targetAmount` are omitted.
+
+The list accepts `type` (comma-separated), inclusive calendar dates `from`/`to`, and entity UUIDs
+`instrument`, `cashAccount`, `investmentAccount`. Filters combine with AND; an account filter
+matches either transfer endpoint. Invalid values, reversed dates and unknown filter UUIDs return
+400. Events sort by `dateTime` ascending, then UUID; the tie-break is arbitrary but fixed.
+Records with no date return `dateTime: null`, sort last, and are excluded when `from` or `to` is supplied.
+
+Amounts keep their recorded currencies. `fees` and `taxes` are positive totals; `units` carries
+all stored fee, tax and forex detail. `grossValue` is derived. On a cash transfer, `amount` is
+outgoing and `targetAmount` is incoming; a forex unit's rate converts its `forex` into its `amount`.
+Transfer references are `fromCashAccount`/`toCashAccount` or
+`fromInvestmentAccount`/`toInvestmentAccount`. Common metadata comes from the canonical record.
+The complete response shapes and type vocabulary are in [openapi.yaml](openapi.yaml).
+
+### `POST /v1/files/{file}/transactions`
+
+Creates a transaction event and returns it with `201` and a `Location`
+header. Buys, sells and transfers create both linked records together. Deliveries require an
+investment account with a reference cash account. Entity references contain only `uuid`; accounts and
+instruments must already exist. See the request schema in [openapi.yaml](openapi.yaml).
+
+Cash transfers require both `amount` (outgoing) and `targetAmount` (incoming), each
+in its account's currency. Same-currency amounts must match and have no units.
+Different currencies require a `gross-value` unit with outgoing `amount`, incoming
+`forex`, and an `exchangeRate` converting incoming currency to outgoing currency.
+Security transfers use the instrument's currency and accept no units. Both transfer
+families require distinct accounts and positive amounts; security transfers also
+require positive shares.
+
+Money uses exactly representable two-decimal values and shares up to eight decimals;
+extra trailing zeros are accepted. Dates require local `YYYY-MM-DDTHH:MM:SS` without
+an offset. `source` defaults to the paired client's name when omitted. Fees, taxes
+and foreign-currency detail are supplied through `units`; top-level `fees`, `taxes`
+and `grossValue` are read-only. The server validates a forex gross-value unit against
+the gross derived from the net amount and charges, without adjusting any numbers.
+Validation reports all applicable errors together with 422 and leaves the file unchanged.
+Transaction creation is currently available through REST only.
+
+### `PATCH /v1/files/{file}/transactions/{uuid}`
+
+Edits the whole event through either linked record UUID, returning the updated canonical event.
+Uses JSON Merge Patch: omitted fields stay unchanged, `null` removes optional values, nested
+objects merge, and `units` replaces the complete array. The complete result must satisfy the
+creation rules, including any existing data the request leaves untouched. All errors return
+together with 422 before any record changes.
+
+An event marked `integrity: "missing-counterpart"` returns `409 incomplete-event` on PATCH.
+It can be deleted through the API or repaired in the application. A missing date must be supplied
+by the patch for the complete event to pass validation.
+
+`type` and account owners cannot change (`immutable-field`); repeating their existing values is
+allowed. Record UUIDs, cross-entry links and investment-plan membership are preserved. A move
+requires DELETE and POST, subject to the deletion safeguard below. Read-only fields, including
+reference names and top-level `grossValue`, return `unknown-field` even when unchanged or `null`.
+An omitted `source` keeps its recorded value; `null` clears it. A valid edit that changes nothing
+does not change timestamps, mark the file dirty or write a log entry. Editing is available through
+REST only. The per-family patch schemas are in [openapi.yaml](openapi.yaml).
+
+### `DELETE /v1/files/{file}/transactions/{uuid}`
+
+Deletes the whole event with `204 No Content`; either linked record UUID removes both
+records. For an event marked `integrity: "missing-counterpart"`, deletes only the surviving record.
+Returns `409 delete-blocked` if either record belongs to an investment plan,
+because deleting it would also remove a plan association that the event does not expose.
+Handle these transactions in the UI. Transaction deletion is available through REST only.
+
 ## Compatibility
 
 Everything under `/v1` is additive: nothing changes meaning, changes type or disappears, and a
@@ -198,7 +275,7 @@ save.
 | 404 | `not-found` | unknown file, **file not enabled**, or unknown entity |
 | 409 | `file-not-open` | file is enabled but not currently open — a human has to open it |
 | 409 | `ambiguous-alias` | alias matches several records; use the UUID |
-| 409 | `delete-blocked` | instrument is referenced by transactions or plans |
+| 409 | `delete-blocked` | instrument is referenced by transactions or plans, or a transaction belongs to a plan |
 | 422 | `validation` | one or more fields rejected; see `errors` |
 | 423 | `user-interaction` | a dialog is open in the app — **retry**, see `Retry-After` |
 | 429 | `pairing-pending` | another pairing request awaits the user — retry after `Retry-After` |

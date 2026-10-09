@@ -41,12 +41,7 @@ import name.abuchen.portfolio.datatransfer.Extractor;
 import name.abuchen.portfolio.datatransfer.Extractor.SkippedItem;
 import name.abuchen.portfolio.datatransfer.ImportAction;
 import name.abuchen.portfolio.datatransfer.ImportAction.Status.Code;
-import name.abuchen.portfolio.datatransfer.actions.CheckCurrenciesAction;
-import name.abuchen.portfolio.datatransfer.actions.CheckForexGrossValueAction;
-import name.abuchen.portfolio.datatransfer.actions.CheckSecurityRelatedValuesAction;
-import name.abuchen.portfolio.datatransfer.actions.CheckTransactionDateAction;
-import name.abuchen.portfolio.datatransfer.actions.CheckValidTypesAction;
-import name.abuchen.portfolio.datatransfer.actions.DetectDuplicatesAction;
+import name.abuchen.portfolio.datatransfer.TransactionRules;
 import name.abuchen.portfolio.model.Account;
 import name.abuchen.portfolio.model.AccountTransferEntry;
 import name.abuchen.portfolio.model.Client;
@@ -653,13 +648,7 @@ public class ReviewExtractedItemsPage extends AbstractWizardPage implements Impo
 
     private void checkEntries(List<ExtractedEntry> entries)
     {
-        List<ImportAction> actions = new ArrayList<>();
-        actions.add(new CheckTransactionDateAction());
-        actions.add(new CheckValidTypesAction());
-        actions.add(new CheckSecurityRelatedValuesAction());
-        actions.add(new DetectDuplicatesAction(client));
-        actions.add(new CheckCurrenciesAction());
-        actions.add(new CheckForexGrossValueAction());
+        List<ImportAction> actions = TransactionRules.importPipeline(client);
 
         List<Exception> allErrors = new ArrayList<>(extractionErrors);
 

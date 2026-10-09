@@ -49,6 +49,9 @@ public class McpToolsDriftTest
                     "GET /v1/openapi.yaml", //
                     "GET /v1/version", //
                     "POST /v1/auth/requests", //
+                    "POST /v1/files/{file}/transactions", // transaction writes are deliberately REST-only
+                    "DELETE /v1/files/{file}/transactions/{uuid}",
+                    "PATCH /v1/files/{file}/transactions/{uuid}",
                     "GET /v1/auth/requests/{id}");
 
     private static final Pattern TOOL_NAME = Pattern.compile("pp_[a-z0-9_]+");
@@ -73,8 +76,8 @@ public class McpToolsDriftTest
     @Test
     public void testTheSixteenToolsAreServed()
     {
-        assertThat(McpTools.all(), hasSize(16));
-        assertThat(McpTools.listPayload().size(), is(16));
+        assertThat(McpTools.all(), hasSize(18));
+        assertThat(McpTools.listPayload().size(), is(18));
     }
 
     @Test
